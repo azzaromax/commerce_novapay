@@ -1,0 +1,6 @@
+<?php
+
+/**
+ * @file
+ * Provides NovaPay payment integration for Drupal Commerce.
+ */
