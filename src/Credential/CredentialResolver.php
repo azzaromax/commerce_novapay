@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Drupal\commerce_novapay\Credential;
 
+use Drupal\Core\Lock\LockBackendInterface;
 use Drupal\commerce_novapay\Exception\InvalidCredentialsException;
+use Drupal\commerce_novapay\Runtime\RuntimeConfiguration;
+use Drupal\commerce_novapay\Runtime\RuntimeProfile;
 
 /**
  * Resolves sandbox fixtures or environment-local live credentials.
@@ -15,75 +18,75 @@ final class CredentialResolver implements CredentialResolverInterface {
 
   private const MAX_KEY_BYTES = 65536;
 
-  private const SANDBOX_MERCHANT_ID = '2';
-
   /**
    * Constructs a NovaPay credential resolver.
-   *
-   * The optional paths exist for isolated tests. The container uses defaults.
    */
   public function __construct(
+    private readonly RsaKeyValidatorInterface $key_validator,
+    private readonly SandboxCredentialProviderInterface $sandbox_credentials,
+    private readonly LockBackendInterface $lock,
     private readonly string $private_base_uri = 'private://commerce_novapay',
-    private readonly ?string $sandbox_resource_directory = NULL,
   ) {}
 
   /**
    * {@inheritdoc}
    */
-  public function resolve(
+  public function resolveRuntimeConfiguration(
     string $gateway_uuid,
-    NovaPayMode $mode,
-  ): Credentials {
+  ): RuntimeConfiguration {
     $this->assertGatewayUuid($gateway_uuid);
+    $directory = rtrim($this->private_base_uri, '/') . '/' . $gateway_uuid;
+    $lock_name = self::getLockName($gateway_uuid);
+    if (!$this->acquireLock($lock_name)) {
+      throw InvalidCredentialsException::liveProfileUnavailable();
+    }
 
-    return match ($mode) {
-      NovaPayMode::Test => $this->resolveSandboxCredentials(),
-      NovaPayMode::Live => $this->resolveLiveCredentials($gateway_uuid),
-    };
+    try {
+      try {
+        $profile = RuntimeProfile::fromArray(
+          $this->readProfile($directory . '/settings.json'),
+        );
+      }
+      catch (\RuntimeException) {
+        throw InvalidCredentialsException::liveProfileUnavailable();
+      }
+
+      $credentials = match ($profile->getMode()) {
+        NovaPayMode::Test => $this->resolveSandboxCredentials(),
+        NovaPayMode::Live => $this->readLiveCredentials(
+          $directory,
+          $profile->getMerchantId(),
+        ),
+      };
+
+      return new RuntimeConfiguration($profile, $credentials);
+    }
+    finally {
+      $this->lock->release($lock_name);
+    }
+  }
+
+  /**
+   * Gets the cooperative lock name shared with profile writes.
+   */
+  public static function getLockName(string $gateway_uuid): string {
+    return 'commerce_novapay.runtime_profile.' . $gateway_uuid;
   }
 
   /**
    * Resolves the packaged NovaPay sandbox fixture.
    */
   private function resolveSandboxCredentials(): Credentials {
-    $resource_directory = $this->sandbox_resource_directory
-      ?? dirname(__DIR__, 2) . '/resources/test';
-
-    try {
-      $private_key = require $resource_directory . '/private-key.php';
-      $public_key = require $resource_directory . '/public-key.php';
-    }
-    catch (\Throwable) {
-      throw InvalidCredentialsException::sandboxCredentialsUnavailable();
-    }
-
-    if (!is_string($private_key) || !is_string($public_key)) {
-      throw InvalidCredentialsException::sandboxCredentialsUnavailable();
-    }
-
-    $this->validatePrivateKey($private_key);
-    $this->validatePublicKey($public_key);
-
-    return new Credentials(
-      NovaPayMode::Test,
-      self::SANDBOX_MERCHANT_ID,
-      $private_key,
-      $public_key,
-    );
+    return $this->sandbox_credentials->getCredentials();
   }
 
   /**
-   * Resolves credentials from a local private filesystem directory.
+   * Reads live credentials while the caller holds the profile lock.
    */
-  private function resolveLiveCredentials(string $gateway_uuid): Credentials {
-    $directory = rtrim($this->private_base_uri, '/') . '/' . $gateway_uuid;
-    $profile = $this->readProfile($directory . '/settings.json');
-
-    if (($profile['mode'] ?? NULL) !== NovaPayMode::Live->value) {
-      throw InvalidCredentialsException::liveProfileUnavailable();
-    }
-
-    $merchant_id = $profile['merchant_id'] ?? NULL;
+  private function readLiveCredentials(
+    string $directory,
+    mixed $merchant_id,
+  ): Credentials {
     if (
       !is_string($merchant_id)
       || trim($merchant_id) === ''
@@ -101,8 +104,8 @@ final class CredentialResolver implements CredentialResolverInterface {
       FALSE,
     );
 
-    $this->validatePrivateKey($private_key);
-    $this->validatePublicKey($public_key);
+    $this->key_validator->validatePrivateKey($private_key);
+    $this->key_validator->validatePublicKey($public_key);
 
     return new Credentials(
       NovaPayMode::Live,
@@ -170,50 +173,6 @@ final class CredentialResolver implements CredentialResolverInterface {
   }
 
   /**
-   * Validates an RSA private key without exposing OpenSSL errors.
-   */
-  private function validatePrivateKey(
-    #[\SensitiveParameter]
-    string $pem,
-  ): void {
-    $this->clearOpenSslErrors();
-    $key = openssl_pkey_get_private($pem);
-    $this->clearOpenSslErrors();
-
-    if ($key === FALSE) {
-      throw InvalidCredentialsException::invalidPrivateKey();
-    }
-
-    $details = openssl_pkey_get_details($key);
-    $this->clearOpenSslErrors();
-    if ($details === FALSE || $details['type'] !== OPENSSL_KEYTYPE_RSA) {
-      throw InvalidCredentialsException::invalidPrivateKey();
-    }
-  }
-
-  /**
-   * Validates an RSA public key without exposing OpenSSL errors.
-   */
-  private function validatePublicKey(
-    #[\SensitiveParameter]
-    string $pem,
-  ): void {
-    $this->clearOpenSslErrors();
-    $key = openssl_pkey_get_public($pem);
-    $this->clearOpenSslErrors();
-
-    if ($key === FALSE) {
-      throw InvalidCredentialsException::invalidPublicKey();
-    }
-
-    $details = openssl_pkey_get_details($key);
-    $this->clearOpenSslErrors();
-    if ($details === FALSE || $details['type'] !== OPENSSL_KEYTYPE_RSA) {
-      throw InvalidCredentialsException::invalidPublicKey();
-    }
-  }
-
-  /**
    * Rejects traversal and non-UUID gateway identifiers.
    */
   private function assertGatewayUuid(string $gateway_uuid): void {
@@ -228,12 +187,15 @@ final class CredentialResolver implements CredentialResolverInterface {
   }
 
   /**
-   * Clears OpenSSL's process-level error queue.
+   * Acquires a short-lived credential read lock.
    */
-  private function clearOpenSslErrors(): void {
-    while (openssl_error_string() !== FALSE) {
-      // Intentionally discard details that may contain sensitive context.
+  private function acquireLock(string $lock_name): bool {
+    if ($this->lock->acquire($lock_name, 10.0)) {
+      return TRUE;
     }
+
+    $this->lock->wait($lock_name, 5);
+    return $this->lock->acquire($lock_name, 10.0);
   }
 
 }

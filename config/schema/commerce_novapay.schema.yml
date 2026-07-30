@@ -1,0 +1,3 @@
+commerce_payment.commerce_payment_gateway.plugin.novapay:
+  type: commerce_payment_gateway_configuration
+  label: 'NovaPay payment gateway configuration'

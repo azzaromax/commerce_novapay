@@ -1,6 +1,40 @@
 services:
+  commerce_novapay.rsa_key_validator:
+    class: Drupal\commerce_novapay\Credential\RsaKeyValidator
+
+  Drupal\commerce_novapay\Credential\RsaKeyValidatorInterface:
+    alias: commerce_novapay.rsa_key_validator
+
+  commerce_novapay.sandbox_credential_provider:
+    class: Drupal\commerce_novapay\Credential\SandboxCredentialProvider
+    arguments:
+      - '@commerce_novapay.rsa_key_validator'
+
+  Drupal\commerce_novapay\Credential\SandboxCredentialProviderInterface:
+    alias: commerce_novapay.sandbox_credential_provider
+
   commerce_novapay.credential_resolver:
     class: Drupal\commerce_novapay\Credential\CredentialResolver
+    arguments:
+      - '@commerce_novapay.rsa_key_validator'
+      - '@commerce_novapay.sandbox_credential_provider'
+      - '@lock'
 
   Drupal\commerce_novapay\Credential\CredentialResolverInterface:
     alias: commerce_novapay.credential_resolver
+
+  commerce_novapay.runtime_profile_storage:
+    class: Drupal\commerce_novapay\Runtime\RuntimeProfileStorage
+    arguments:
+      - '@commerce_novapay.rsa_key_validator'
+      - '@lock'
+
+  Drupal\commerce_novapay\Runtime\RuntimeProfileStorageInterface:
+    alias: commerce_novapay.runtime_profile_storage
+
+  commerce_novapay.runtime_ready_gateway_subscriber:
+    class: Drupal\commerce_novapay\EventSubscriber\RuntimeReadyGatewaySubscriber
+    arguments:
+      - '@commerce_novapay.credential_resolver'
+    tags:
+      - { name: event_subscriber }

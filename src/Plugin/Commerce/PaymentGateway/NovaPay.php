@@ -1,0 +1,607 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Drupal\commerce_novapay\Plugin\Commerce\PaymentGateway;
+
+use Drupal\Core\Entity\EntityFormInterface;
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\StringTranslation\TranslatableMarkup;
+use Drupal\Core\Url;
+use Drupal\commerce_novapay\Credential\CredentialResolverInterface;
+use Drupal\commerce_novapay\Credential\NovaPayMode;
+use Drupal\commerce_novapay\Credential\RsaKeyValidatorInterface;
+use Drupal\commerce_novapay\Exception\InvalidRuntimeProfileException;
+use Drupal\commerce_novapay\Runtime\RuntimeConfiguration;
+use Drupal\commerce_novapay\Runtime\RuntimeProfile;
+use Drupal\commerce_novapay\Runtime\RuntimeProfileStorageInterface;
+use Drupal\commerce_novapay\Runtime\TransactionMode;
+use Drupal\commerce_payment\Attribute\CommercePaymentGateway;
+use Drupal\commerce_payment\Entity\PaymentGatewayInterface;
+use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\OffsitePaymentGatewayBase;
+use Symfony\Component\DependencyInjection\ContainerInterface;
+use Symfony\Component\HttpFoundation\File\UploadedFile;
+use Symfony\Component\HttpFoundation\RequestStack;
+
+/**
+ * Provides the NovaPay off-site payment gateway.
+ */
+#[CommercePaymentGateway(
+  id: 'novapay',
+  label: new TranslatableMarkup('NovaPay'),
+  display_label: new TranslatableMarkup('NovaPay'),
+  modes: [
+    'n/a' => new TranslatableMarkup('Environment-local'),
+  ],
+  payment_method_types: ['credit_card'],
+  requires_billing_information: FALSE,
+)]
+final class NovaPay extends OffsitePaymentGatewayBase {
+
+  private const MAX_KEY_BYTES = 65536;
+
+  /**
+   * The environment-local runtime profile storage.
+   */
+  private RuntimeProfileStorageInterface $runtimeProfileStorage;
+
+  /**
+   * The credential resolver.
+   */
+  private CredentialResolverInterface $credentialResolver;
+
+  /**
+   * The independent RSA key validator.
+   */
+  private RsaKeyValidatorInterface $keyValidator;
+
+  /**
+   * The current request stack used for raw upload fallback.
+   */
+  private RequestStack $requestStack;
+
+  /**
+   * {@inheritdoc}
+   *
+   * @param \Symfony\Component\DependencyInjection\ContainerInterface $container
+   *   The service container.
+   * @param array<string, mixed> $configuration
+   *   The plugin configuration.
+   * @param string $plugin_id
+   *   The plugin ID.
+   * @param array<string, mixed> $plugin_definition
+   *   The plugin definition.
+   */
+  public static function create(
+    ContainerInterface $container,
+    array $configuration,
+    $plugin_id,
+    $plugin_definition,
+  ) {
+    $instance = parent::create(
+      $container,
+      $configuration,
+      $plugin_id,
+      $plugin_definition,
+    );
+    $instance->runtimeProfileStorage = $container->get(
+      'commerce_novapay.runtime_profile_storage',
+    );
+    $instance->credentialResolver = $container->get(
+      'commerce_novapay.credential_resolver',
+    );
+    $instance->keyValidator = $container->get(
+      'commerce_novapay.rsa_key_validator',
+    );
+    $instance->requestStack = $container->get('request_stack');
+
+    return $instance;
+  }
+
+  /**
+   * {@inheritdoc}
+   *
+   * @param array<array-key, mixed> $form
+   *   The plugin configuration form.
+   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   *   The complete form state.
+   *
+   * @return array<string, mixed>
+   *   The completed plugin configuration form.
+   */
+  public function buildConfigurationForm(
+    array $form,
+    FormStateInterface $form_state,
+  ) {
+    $form = parent::buildConfigurationForm($form, $form_state);
+    $profile = NULL;
+    $profile_error = FALSE;
+    $has_live_keys = FALSE;
+
+    try {
+      $gateway_uuid = $this->getGatewayUuid($form_state);
+      $profile = $this->runtimeProfileStorage->load($gateway_uuid);
+      $has_live_keys = $this->runtimeProfileStorage
+        ->hasValidLiveKeys($gateway_uuid);
+    }
+    catch (\RuntimeException) {
+      $profile_error = TRUE;
+    }
+
+    $runtime_mode = $profile?->getMode() ?? NovaPayMode::Test;
+    $form['runtime_settings'] = [
+      '#type' => 'details',
+      '#title' => $this->t('Environment-local NovaPay settings'),
+      '#open' => TRUE,
+      '#description' => $this->t(
+        'These values are stored in the Drupal private filesystem and are not exported with configuration.',
+      ),
+    ];
+    if ($profile_error) {
+      $form['runtime_settings']['profile_warning'] = [
+        '#type' => 'item',
+        '#markup' => $this->t(
+          'The current local settings are unavailable. Saving requires writable private storage.',
+        ),
+      ];
+    }
+
+    $form['runtime_settings']['runtime_mode'] = [
+      '#type' => 'radios',
+      '#title' => $this->t('NovaPay API mode'),
+      '#options' => [
+        NovaPayMode::Test->value => $this->t('Test'),
+        NovaPayMode::Live->value => $this->t('Live'),
+      ],
+      '#default_value' => $runtime_mode->value,
+      '#required' => TRUE,
+    ];
+    $form['runtime_settings']['test_credentials'] = [
+      '#type' => 'item',
+      '#title' => $this->t('Sandbox credentials'),
+      '#markup' => $this->t(
+        'Test mode always uses the packaged NovaPay sandbox keys and Merchant ID 2.',
+      ),
+      '#states' => [
+        'visible' => [
+          ':input[name="configuration[novapay][runtime_settings][runtime_mode]"]' => [
+            'value' => NovaPayMode::Test->value,
+          ],
+        ],
+      ],
+    ];
+
+    $form['runtime_settings']['live_credentials'] = [
+      '#type' => 'container',
+      '#states' => [
+        'visible' => [
+          ':input[name="configuration[novapay][runtime_settings][runtime_mode]"]' => [
+            'value' => NovaPayMode::Live->value,
+          ],
+        ],
+      ],
+    ];
+    $form['runtime_settings']['live_credentials']['merchant_id'] = [
+      '#type' => 'textfield',
+      '#title' => $this->t('Merchant ID'),
+      '#default_value' => $profile?->getMerchantId() ?? '',
+      '#maxlength' => 128,
+    ];
+    $form['runtime_settings']['live_credentials']['private_key_upload'] = [
+      '#type' => 'file',
+      '#parents' => ['novapay_private_key_upload'],
+      '#title' => $this->t('Merchant private key'),
+      '#description' => $has_live_keys
+        ? $this->t('A live key is stored locally. Upload both keys to rotate them.')
+        : $this->t('Upload a PEM-encoded RSA private key.'),
+      '#accept' => '.pem,.key,text/plain,application/x-pem-file',
+    ];
+    $form['runtime_settings']['live_credentials']['public_key_upload'] = [
+      '#type' => 'file',
+      '#parents' => ['novapay_public_key_upload'],
+      '#title' => $this->t('NovaPay public key'),
+      '#description' => $has_live_keys
+        ? $this->t('A live key is stored locally. Upload both keys to rotate them.')
+        : $this->t('Upload the PEM-encoded RSA public key supplied by NovaPay.'),
+      '#accept' => '.pem,.key,text/plain,application/x-pem-file',
+    ];
+
+    $form['runtime_settings']['transaction_mode'] = [
+      '#type' => 'radios',
+      '#title' => $this->t('Transaction mode'),
+      '#options' => [
+        TransactionMode::Direct->value => $this->t('Direct'),
+        TransactionMode::Hold->value => $this->t('Hold'),
+      ],
+      '#default_value' => $profile?->getTransactionMode()->value
+        ?? TransactionMode::Direct->value,
+      '#required' => TRUE,
+    ];
+    $form['runtime_settings']['recipient_identifier'] = [
+      '#type' => 'textfield',
+      '#title' => $this->t('Recipient identifier'),
+      '#description' => $this->t(
+        'Optional EDRPOU or tax identifier of a payment recipient different from the merchant.',
+      ),
+      '#default_value' => $profile?->getRecipientIdentifier() ?? '',
+      '#maxlength' => 128,
+    ];
+    $form['runtime_settings']['logging_enabled'] = [
+      '#type' => 'checkbox',
+      '#title' => $this->t('Enable detailed logging'),
+      '#description' => $this->t(
+        'Only sanitized request and response metadata may be logged.',
+      ),
+      '#default_value' => $profile?->isLoggingEnabled() ?? FALSE,
+    ];
+
+    $form['notify_url'] = [
+      '#type' => 'textfield',
+      '#title' => $this->t('Postback URL'),
+      '#default_value' => $this->getNotifyUrlValue($form_state),
+      '#disabled' => TRUE,
+      '#description' => $this->t(
+        'Commerce generates this URL. It cannot be entered manually.',
+      ),
+    ];
+
+    return $form;
+  }
+
+  /**
+   * {@inheritdoc}
+   *
+   * @param array<array-key, mixed> $form
+   *   The plugin configuration form.
+   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   *   The complete form state.
+   */
+  public function validateConfigurationForm(
+    array &$form,
+    FormStateInterface $form_state,
+  ): void {
+    parent::validateConfigurationForm($form, $form_state);
+    $values = $this->getRuntimeValues($form, $form_state);
+    $mode = NovaPayMode::tryFrom((string) ($values['runtime_mode'] ?? ''));
+    $transaction_mode = TransactionMode::tryFrom(
+      (string) ($values['transaction_mode'] ?? ''),
+    );
+
+    if ($mode === NULL) {
+      $form_state->setError(
+        $form['runtime_settings']['runtime_mode'],
+        $this->t('Select a valid NovaPay API mode.'),
+      );
+    }
+    if ($transaction_mode === NULL) {
+      $form_state->setError(
+        $form['runtime_settings']['transaction_mode'],
+        $this->t('Select a valid transaction mode.'),
+      );
+    }
+
+    $live_values = $values['live_credentials'] ?? [];
+    $merchant_id = is_array($live_values)
+      ? trim((string) ($live_values['merchant_id'] ?? ''))
+      : '';
+    if ($mode === NovaPayMode::Live && $merchant_id === '') {
+      $form_state->setError(
+        $form['runtime_settings']['live_credentials']['merchant_id'],
+        $this->t('Merchant ID is required in live mode.'),
+      );
+    }
+
+    try {
+      $gateway_uuid = $this->getGatewayUuid($form_state);
+      $this->runtimeProfileStorage->assertWritable($gateway_uuid);
+      if ($mode === NovaPayMode::Live) {
+        $this->validateLiveUploads($form, $form_state, $gateway_uuid);
+      }
+    }
+    catch (InvalidRuntimeProfileException $exception) {
+      $form_state->setError(
+        $form['runtime_settings'],
+        $this->t('NovaPay local settings cannot be saved securely.'),
+      );
+    }
+  }
+
+  /**
+   * {@inheritdoc}
+   *
+   * @param array<array-key, mixed> $form
+   *   The plugin configuration form.
+   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   *   The complete form state.
+   */
+  public function submitConfigurationForm(
+    array &$form,
+    FormStateInterface $form_state,
+  ): void {
+    parent::submitConfigurationForm($form, $form_state);
+    if ($form_state->getErrors()) {
+      return;
+    }
+
+    $values = $this->getRuntimeValues($form, $form_state);
+    $mode = NovaPayMode::from((string) $values['runtime_mode']);
+    $live_values = $values['live_credentials'] ?? [];
+    $merchant_id = is_array($live_values)
+      ? trim((string) ($live_values['merchant_id'] ?? ''))
+      : '';
+    $profile = new RuntimeProfile(
+      $mode,
+      $mode === NovaPayMode::Live
+        ? $merchant_id
+        : NULL,
+      TransactionMode::from((string) $values['transaction_mode']),
+      trim((string) ($values['recipient_identifier'] ?? '')),
+      !empty($values['logging_enabled']),
+    );
+
+    $private_key = NULL;
+    $public_key = NULL;
+    if ($mode === NovaPayMode::Live) {
+      $private_key = $this->readUploadedPem(
+        $this->getUploadedFile($form_state, 'novapay_private_key_upload'),
+      );
+      $public_key = $this->readUploadedPem(
+        $this->getUploadedFile($form_state, 'novapay_public_key_upload'),
+      );
+    }
+
+    $this->runtimeProfileStorage->save(
+      $this->getGatewayUuid($form_state),
+      $profile,
+      $private_key,
+      $public_key,
+    );
+  }
+
+  /**
+   * Resolves settings, credentials, and the matching API endpoint.
+   */
+  public function getRuntimeConfiguration(): RuntimeConfiguration {
+    return $this->credentialResolver->resolveRuntimeConfiguration(
+      $this->getGatewayUuid(),
+    );
+  }
+
+  /**
+   * Validates optional live rotation uploads.
+   *
+   * @param array<array-key, mixed> $form
+   *   The plugin configuration form.
+   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   *   The complete form state.
+   * @param string $gateway_uuid
+   *   The Commerce payment gateway UUID.
+   */
+  private function validateLiveUploads(
+    array &$form,
+    FormStateInterface $form_state,
+    string $gateway_uuid,
+  ): void {
+    $private_upload = $this->getUploadedFile(
+      $form_state,
+      'novapay_private_key_upload',
+    );
+    $public_upload = $this->getUploadedFile(
+      $form_state,
+      'novapay_public_key_upload',
+    );
+
+    if (($private_upload === NULL) !== ($public_upload === NULL)) {
+      $message = $this->t('Upload both live key files together.');
+      $form_state->setError(
+        $form['runtime_settings']['live_credentials']['private_key_upload'],
+        $message,
+      );
+      $form_state->setError(
+        $form['runtime_settings']['live_credentials']['public_key_upload'],
+        $message,
+      );
+      return;
+    }
+
+    if ($private_upload === NULL && $public_upload === NULL) {
+      if (!$this->runtimeProfileStorage->hasValidLiveKeys($gateway_uuid)) {
+        $form_state->setError(
+          $form['runtime_settings']['live_credentials']['private_key_upload'],
+          $this->t('Upload both live key files.'),
+        );
+      }
+      return;
+    }
+
+    try {
+      $private_key = $this->readUploadedPem($private_upload);
+      $public_key = $this->readUploadedPem($public_upload);
+      if ($private_key === NULL || $public_key === NULL) {
+        throw InvalidRuntimeProfileException::incompleteKeyUpload();
+      }
+      $this->keyValidator->validatePrivateKey($private_key);
+      $this->keyValidator->validatePublicKey($public_key);
+    }
+    catch (\RuntimeException) {
+      $form_state->setError(
+        $form['runtime_settings']['live_credentials'],
+        $this->t('Upload valid RSA private and public PEM files.'),
+      );
+    }
+  }
+
+  /**
+   * Gets the submitted values inside the runtime settings container.
+   *
+   * @param array<array-key, mixed> $form
+   *   The plugin configuration form.
+   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   *   The complete form state.
+   *
+   * @return array<string, mixed>
+   *   Submitted runtime values.
+   */
+  private function getRuntimeValues(
+    array $form,
+    FormStateInterface $form_state,
+  ): array {
+    $parents = $form['#parents'] ?? [];
+    $values = $form_state->getValue($parents);
+    if (!is_array($values)) {
+      return [];
+    }
+
+    $runtime_values = $values['runtime_settings'] ?? NULL;
+    return is_array($runtime_values) ? $runtime_values : [];
+  }
+
+  /**
+   * Gets the first uploaded file from a Form API file element.
+   *
+   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   *   The complete form state.
+   * @param string $key
+   *   The top-level upload element key.
+   */
+  private function getUploadedFile(
+    FormStateInterface $form_state,
+    string $key,
+  ): ?UploadedFile {
+    $uploads = $form_state->getValue($key);
+    if ($uploads instanceof UploadedFile) {
+      return $uploads;
+    }
+    if (is_array($uploads)) {
+      foreach ($uploads as $upload) {
+        if ($upload instanceof UploadedFile) {
+          return $upload;
+        }
+      }
+    }
+
+    // Drupal Core's single-file value callback casts the Symfony
+    // UploadedFile object to an array in some supported Core/Symfony
+    // combinations. Read the exact allow-listed field from the request as a
+    // compatibility fallback; size and upload validity are checked separately.
+    $request = $this->requestStack->getCurrentRequest();
+    $request_uploads = $request?->files->get('files', []);
+    if (!is_array($request_uploads)) {
+      return NULL;
+    }
+
+    $upload = $request_uploads[$key] ?? NULL;
+    if ($upload instanceof UploadedFile) {
+      return $upload;
+    }
+    if (is_array($upload)) {
+      foreach ($upload as $candidate) {
+        if ($candidate instanceof UploadedFile) {
+          return $candidate;
+        }
+      }
+    }
+
+    return NULL;
+  }
+
+  /**
+   * Reads a bounded valid HTTP upload without persisting it.
+   */
+  private function readUploadedPem(
+    ?UploadedFile $upload,
+  ): ?string {
+    if ($upload === NULL) {
+      return NULL;
+    }
+
+    $size = $upload->getSize();
+    if (
+      !$upload->isValid()
+      || !is_int($size)
+      || $size < 1
+      || $size > self::MAX_KEY_BYTES
+    ) {
+      throw InvalidRuntimeProfileException::incompleteKeyUpload();
+    }
+
+    $contents = @file_get_contents($upload->getPathname());
+    if (!is_string($contents) || strlen($contents) !== $size) {
+      throw InvalidRuntimeProfileException::incompleteKeyUpload();
+    }
+
+    return $contents;
+  }
+
+  /**
+   * Gets the current Commerce payment gateway UUID.
+   */
+  private function getGatewayUuid(
+    ?FormStateInterface $form_state = NULL,
+  ): string {
+    // The Commerce plugin-configuration inline form creates a standalone
+    // plugin instance, so it has no parent entity while the gateway admin
+    // form is being built or submitted. Resolve that entity from the form
+    // object for admin operations.
+    $form_gateway = $this->getFormGateway($form_state);
+    if ($form_gateway !== NULL) {
+      $uuid = $form_gateway->uuid();
+      if (is_string($uuid) && $uuid !== '') {
+        return $uuid;
+      }
+    }
+
+    // Commerce documents this property as non-null, but its own base class
+    // leaves it unavailable when a plugin is configured without a parent.
+    // @phpstan-ignore-next-line isset.property
+    if (!isset($this->parentEntity)) {
+      throw InvalidRuntimeProfileException::invalidProfile();
+    }
+
+    $uuid = $this->parentEntity->uuid();
+    if (!is_string($uuid) || $uuid === '') {
+      throw InvalidRuntimeProfileException::invalidProfile();
+    }
+
+    return $uuid;
+  }
+
+  /**
+   * Gets a safe read-only callback URL value.
+   */
+  private function getNotifyUrlValue(
+    FormStateInterface $form_state,
+  ): string {
+    $form_gateway = $this->getFormGateway($form_state);
+    if ($form_gateway !== NULL && $form_gateway->id()) {
+      return Url::fromRoute(
+        'commerce_payment.notify',
+        ['commerce_payment_gateway' => $form_gateway->id()],
+        ['absolute' => TRUE],
+      )->toString();
+    }
+
+    // @phpstan-ignore-next-line isset.property
+    if (!isset($this->parentEntity) || !$this->parentEntity->id()) {
+      return (string) $this->t('Available after the gateway is saved.');
+    }
+
+    return $this->getNotifyUrl()->toString();
+  }
+
+  /**
+   * Gets the gateway entity from an administrative entity form.
+   */
+  private function getFormGateway(
+    ?FormStateInterface $form_state,
+  ): ?PaymentGatewayInterface {
+    $form_object = $form_state?->getFormObject();
+    if (!$form_object instanceof EntityFormInterface) {
+      return NULL;
+    }
+
+    $entity = $form_object->getEntity();
+    return $entity instanceof PaymentGatewayInterface ? $entity : NULL;
+  }
+
+}

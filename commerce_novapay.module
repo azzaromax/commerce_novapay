@@ -4,3 +4,21 @@
  * @file
  * Provides NovaPay payment integration for Drupal Commerce.
  */
+
+use Drupal\commerce_payment\Entity\PaymentGatewayInterface;
+
+/**
+ * Implements hook_ENTITY_TYPE_predelete().
+ */
+function commerce_novapay_commerce_payment_gateway_predelete(
+  PaymentGatewayInterface $commerce_payment_gateway,
+): void {
+  if ($commerce_payment_gateway->getPluginId() !== 'novapay') {
+    return;
+  }
+
+  $uuid = $commerce_payment_gateway->uuid();
+  if (is_string($uuid) && $uuid !== '') {
+    \Drupal::service('commerce_novapay.runtime_profile_storage')->delete($uuid);
+  }
+}

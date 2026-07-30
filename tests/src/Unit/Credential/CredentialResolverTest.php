@@ -4,10 +4,15 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\commerce_novapay\Unit\Credential;
 
+use Drupal\Core\Lock\NullLockBackend;
 use Drupal\commerce_novapay\Credential\CredentialResolver;
 use Drupal\commerce_novapay\Credential\Credentials;
 use Drupal\commerce_novapay\Credential\NovaPayMode;
+use Drupal\commerce_novapay\Credential\RsaKeyValidator;
+use Drupal\commerce_novapay\Credential\SandboxCredentialProvider;
 use Drupal\commerce_novapay\Exception\InvalidCredentialsException;
+use Drupal\commerce_novapay\Runtime\RuntimeProfile;
+use Drupal\commerce_novapay\Runtime\TransactionMode;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -72,11 +77,11 @@ final class CredentialResolverTest extends TestCase {
    * Tests the fixed official NovaPay sandbox credential set.
    */
   public function testResolvesPackagedSandboxCredentials(): void {
+    $this->writeProfile($this->createProfile(NovaPayMode::Test)->toArray());
     $resolver = $this->createResolver();
-    $credentials = $resolver->resolve(
-      self::GATEWAY_UUID,
-      NovaPayMode::Test,
-    );
+    $credentials = $resolver
+      ->resolveRuntimeConfiguration(self::GATEWAY_UUID)
+      ->getCredentials();
 
     self::assertSame(NovaPayMode::Test, $credentials->getMode());
     self::assertSame('2', $credentials->getMerchantId());
@@ -108,10 +113,9 @@ final class CredentialResolverTest extends TestCase {
     $public_key = $this->createPublicKey();
     $this->writeLiveFiles('merchant-uat', $private_key, $public_key);
 
-    $credentials = $this->createResolver()->resolve(
-      self::GATEWAY_UUID,
-      NovaPayMode::Live,
-    );
+    $credentials = $this->createResolver()
+      ->resolveRuntimeConfiguration(self::GATEWAY_UUID)
+      ->getCredentials();
 
     self::assertSame(NovaPayMode::Live, $credentials->getMode());
     self::assertSame('merchant-uat', $credentials->getMerchantId());
@@ -124,10 +128,8 @@ final class CredentialResolverTest extends TestCase {
    */
   public function testMissingLiveProfileUsesSafeException(): void {
     try {
-      $this->createResolver()->resolve(
-        self::GATEWAY_UUID,
-        NovaPayMode::Live,
-      );
+      $this->createResolver()
+        ->resolveRuntimeConfiguration(self::GATEWAY_UUID);
       self::fail('A missing live profile must be rejected.');
     }
     catch (InvalidCredentialsException $exception) {
@@ -147,21 +149,20 @@ final class CredentialResolverTest extends TestCase {
   }
 
   /**
-   * Tests that a test profile cannot be resolved as live credentials.
+   * Tests that callers cannot override the environment stored in the profile.
    */
-  public function testLiveModeRejectsMismatchedLocalProfile(): void {
-    $this->writeProfile([
-      'mode' => 'test',
-      'merchant_id' => 'should-not-be-used',
-    ]);
+  public function testStoredProfileSelectsCredentialsAndEndpoint(): void {
+    $this->writeProfile($this->createProfile(NovaPayMode::Test)->toArray());
+    $configuration = $this->createResolver()
+      ->resolveRuntimeConfiguration(self::GATEWAY_UUID);
 
-    $this->expectException(InvalidCredentialsException::class);
-    $this->expectExceptionMessage(
-      'NovaPay live settings are missing or unreadable.',
+    self::assertSame(
+      NovaPayMode::Test,
+      $configuration->getCredentials()->getMode(),
     );
-    $this->createResolver()->resolve(
-      self::GATEWAY_UUID,
-      NovaPayMode::Live,
+    self::assertSame(
+      'https://api-qecom.novapay.ua',
+      $configuration->getApiBaseUrl(),
     );
   }
 
@@ -177,10 +178,8 @@ final class CredentialResolverTest extends TestCase {
     );
 
     try {
-      $this->createResolver()->resolve(
-        self::GATEWAY_UUID,
-        NovaPayMode::Live,
-      );
+      $this->createResolver()
+        ->resolveRuntimeConfiguration(self::GATEWAY_UUID);
       self::fail('An invalid private key must be rejected.');
     }
     catch (InvalidCredentialsException $exception) {
@@ -207,10 +206,8 @@ final class CredentialResolverTest extends TestCase {
     );
 
     try {
-      $this->createResolver()->resolve(
-        self::GATEWAY_UUID,
-        NovaPayMode::Live,
-      );
+      $this->createResolver()
+        ->resolveRuntimeConfiguration(self::GATEWAY_UUID);
       self::fail('An invalid public key must be rejected.');
     }
     catch (InvalidCredentialsException $exception) {
@@ -233,17 +230,17 @@ final class CredentialResolverTest extends TestCase {
     $this->expectExceptionMessage(
       'The payment gateway identifier is invalid.',
     );
-    $this->createResolver()->resolve('../production', NovaPayMode::Test);
+    $this->createResolver()->resolveRuntimeConfiguration('../production');
   }
 
   /**
    * Tests that debug and serialization cannot expose key material.
    */
   public function testCredentialObjectProtectsKeyMaterial(): void {
-    $credentials = $this->createResolver()->resolve(
-      self::GATEWAY_UUID,
-      NovaPayMode::Test,
-    );
+    $this->writeProfile($this->createProfile(NovaPayMode::Test)->toArray());
+    $credentials = $this->createResolver()
+      ->resolveRuntimeConfiguration(self::GATEWAY_UUID)
+      ->getCredentials();
     $debug = $credentials->__debugInfo();
 
     self::assertSame('[redacted]', $debug['private_key_pem']);
@@ -257,7 +254,12 @@ final class CredentialResolverTest extends TestCase {
    * Creates a resolver backed by the test's temporary private directory.
    */
   private function createResolver(): CredentialResolver {
+    $validator = new RsaKeyValidator();
+
     return new CredentialResolver(
+      $validator,
+      new SandboxCredentialProvider($validator),
+      new NullLockBackend(),
       $this->temporaryDirectory . '/commerce_novapay',
     );
   }
@@ -272,10 +274,9 @@ final class CredentialResolverTest extends TestCase {
     #[\SensitiveParameter]
     string $public_key,
   ): void {
-    $this->writeProfile([
-      'mode' => 'live',
-      'merchant_id' => $merchant_id,
-    ]);
+    $this->writeProfile(
+      $this->createProfile(NovaPayMode::Live, $merchant_id)->toArray(),
+    );
     file_put_contents(
       $this->gatewayDirectory . '/private.pem',
       $private_key,
@@ -289,13 +290,29 @@ final class CredentialResolverTest extends TestCase {
   /**
    * Writes a local runtime profile.
    *
-   * @param array<string, string> $profile
+   * @param array<string, bool|int|string> $profile
    *   The profile values.
    */
   private function writeProfile(array $profile): void {
     file_put_contents(
       $this->gatewayDirectory . '/settings.json',
       json_encode($profile, JSON_THROW_ON_ERROR),
+    );
+  }
+
+  /**
+   * Creates a complete strict runtime profile.
+   */
+  private function createProfile(
+    NovaPayMode $mode,
+    ?string $merchant_id = NULL,
+  ): RuntimeProfile {
+    return new RuntimeProfile(
+      $mode,
+      $mode === NovaPayMode::Live ? $merchant_id : NULL,
+      TransactionMode::Direct,
+      '',
+      FALSE,
     );
   }
 
