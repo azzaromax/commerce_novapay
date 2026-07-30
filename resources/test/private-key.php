@@ -1,0 +1,45 @@
+<?php
+
+/**
+ * @file
+ * Provides the official NovaPay sandbox merchant private key fixture.
+ */
+
+declare(strict_types=1);
+
+/**
+ * Official NovaPay sandbox private key for merchant_id 2.
+ *
+ * This public test fixture is documented in docs/novapay_kb_general.md and
+ * must never be used outside NovaPay's test environment.
+ */
+return <<<'PEM'
+-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCgYSuVeKh3Zl8O
+sEcOR0MuUcKW6S2+FNOV9R8eJItSoe3U96zOqwNw8DTa2wOKR5W0WPeRQkg2Y2zk
+5zFGLSHG1y9+uTDOmO/1kMBzh99P7bvjlE5ofV5+iXH8/Xq9Ye/N+paiAQYN8ym6
+N3h9mYHuU9IlksJaCG1RCWjNTxLwoCl0/CJZVawKREAM2XVxWH28HUaeMRTx2Rmk
+iQhFGKQJJlyotk9WzkjgqmMJcZHwM8qBRF6ZeBD8hKV3wXWLFcDjKgIMK51IXKbO
+335ZdiZdEBbAxg4d9XVe0SR9Z5QgP6+Jw3l5LtCJbZqb9Y2viosJDZGJdTgv4inG
+bMm3+HTPAgMBAAECggEAA3rrI259qk5TFnBkVpGRijg92iS3FK9v8z80FiF6hly/
+D0S2P/bDN6XRjttkntx7+qzvyOzL/NMWysZyAO0/b1P6LUa7P+2bErJ9p8fmTc8f
+izdH8P5lkVs+4MyjFLrZcNRy/YPKDdglMnrpMm6lJfbLrF2FuiE+GGFAmLPsrrOF
+/RaRTm2QX+e+tjZhtIBHDMHoPSfcpB2iGMB/Spm/iy3RSWTQYp7ySEu9oaYrTbcG
+TxQxOQcwKc7FqbggAyUHEniLsY15BGkJKxGoB4HelnxR+FernJdkNcywdZPzgVFe
+lmpltxlP6le4AzSQPVmj+IBrv/h4McWZEUqzFvGWAQKBgQDQ5SW1YvtcEFgT2HCE
+2hAxesnLHBEmdwvzkGwmmdwlwIMTxmAELlO8mCQooMbcJAY2O4Kd1tClKKo+SlYl
+Aisoc42yGgLsFvauKRl3Fdc+oCadXH3FLhh0PDMJ3XLsZAJ0LM3W1zFeBRJS1Epb
+6qqlqrqNqgK14ndnM+Yz5rXn/wKBgQDEi1/ywVtgBNQxp7fSVotX+I44amMfqLq/
+yGvo/U37R2sp788yRQ/x0fHDGIXQ4krXymOrEPBQM5mb3VdD1RjfbieSETUwxO+k
+Cyx7BopTARcNTo4Nt+vE/KyQeYywGuq9Q/YpkGAlHCRNRKR5mWrsxr8FKGMlel99
+j/vinBDzMQKBgF3pVp2IJUbLVj19xYAEZNlJwWSddpxbUrUqDWUBMLaMKKGAQnQ+
+u4iCwWa+eQhI7b393QfGpkBJ2tdsJfQ3WF20LVSPWxb2b+n2MiuWVxEhgJqoFSbL
+RVUkJzHdK6hYgb3m0pcuYVRKZWV1aQSPqC4YZgwADX3llRaBf5F/u/HTAoGASM5s
+Y4uW4rHHPQGpCYS/p33OiT13rKGfVC3VM4Cp43xoSSepdDC7IFQqH6A06dT57oft
+ddAXhU4oB+HtUpZc2V9/zw8Kyh8ZuoXdG1Gn6emMdYR1AMXx043aCsbMA+xkqmnD
+hVATHYwYMntMBjN7tWxGFI4KdDapquSsZRx09vECgYEAh0fPQPlT7Bbsd50/MDpG
+HXwt8v3LFZtxAPLWZdOP7Wmb8DJ5L/yazlVnT1u5y+JfcYGZIEZ/SKLM6I+1xhTN
+f8y23MXWUCw00jhLK2clpbjVfWKey2pEcm6aGG3/CMEaOEqspsDS9bE8GdQPfNfw
+6VicGagZw45jEQ416jB5d8w=
+-----END PRIVATE KEY-----
+PEM;

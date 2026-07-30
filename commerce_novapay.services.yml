@@ -1,1 +1,6 @@
-services: { }
+services:
+  commerce_novapay.credential_resolver:
+    class: Drupal\commerce_novapay\Credential\CredentialResolver
+
+  Drupal\commerce_novapay\Credential\CredentialResolverInterface:
+    alias: commerce_novapay.credential_resolver
