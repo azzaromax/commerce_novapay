@@ -5,6 +5,22 @@ services:
   Drupal\commerce_novapay\Credential\RsaKeyValidatorInterface:
     alias: commerce_novapay.rsa_key_validator
 
+  commerce_novapay.signer:
+    class: Drupal\commerce_novapay\Signature\RsaSha256Signer
+    arguments:
+      - '@commerce_novapay.rsa_key_validator'
+
+  Drupal\commerce_novapay\Signature\SignerInterface:
+    alias: commerce_novapay.signer
+
+  commerce_novapay.verifier:
+    class: Drupal\commerce_novapay\Signature\RsaSha256Verifier
+    arguments:
+      - '@commerce_novapay.rsa_key_validator'
+
+  Drupal\commerce_novapay\Signature\VerifierInterface:
+    alias: commerce_novapay.verifier
+
   commerce_novapay.sandbox_credential_provider:
     class: Drupal\commerce_novapay\Credential\SandboxCredentialProvider
     arguments:
