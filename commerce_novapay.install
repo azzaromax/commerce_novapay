@@ -1,0 +1,26 @@
+<?php
+
+/**
+ * @file
+ * Install and update hooks for Commerce NovaPay.
+ */
+
+declare(strict_types=1);
+
+/**
+ * Installs the NovaPay payment bundle and its fields on existing sites.
+ */
+function commerce_novapay_update_11001(): void {
+  $payment_type_manager = \Drupal::service(
+    'plugin.manager.commerce_payment_type',
+  );
+  $payment_type_manager->clearCachedDefinitions();
+
+  $entity_type = \Drupal::entityTypeManager()->getDefinition(
+    'commerce_payment',
+  );
+  \Drupal::service('entity.bundle_plugin_installer')->installBundles(
+    $entity_type,
+    ['commerce_novapay'],
+  );
+}

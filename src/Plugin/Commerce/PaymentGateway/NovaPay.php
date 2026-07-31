@@ -34,6 +34,7 @@ use Symfony\Component\HttpFoundation\RequestStack;
     'n/a' => new TranslatableMarkup('Environment-local'),
   ],
   payment_method_types: ['credit_card'],
+  payment_type: 'novapay_payment',
   requires_billing_information: FALSE,
 )]
 final class NovaPay extends OffsitePaymentGatewayBase {
