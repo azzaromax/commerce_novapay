@@ -81,6 +81,35 @@ final class NovaPayUploadTest extends TestCase {
   }
 
   /**
+   * Tests that the request fallback ignores a different upload field.
+   */
+  public function testIgnoresUploadFromDifferentRequestField(): void {
+    $upload = new UploadedFile(
+      $this->temporaryFile,
+      'unrelated-key.pem',
+      'text/plain',
+      UPLOAD_ERR_OK,
+      TRUE,
+    );
+    $request = new Request(
+      files: ['files' => ['unrelated_upload' => $upload]],
+    );
+    $request_stack = new RequestStack();
+    $request_stack->push($request);
+
+    $form_state = new FormState();
+    $form_state->setValue(self::UPLOAD_KEY, (array) $upload);
+    $plugin = new NovaPay([], 'novapay', []);
+    $property = new \ReflectionProperty($plugin, 'requestStack');
+    $property->setValue($plugin, $request_stack);
+    $method = new \ReflectionMethod($plugin, 'getUploadedFile');
+
+    self::assertNull(
+      $method->invoke($plugin, $form_state, self::UPLOAD_KEY),
+    );
+  }
+
+  /**
    * Tests the normal Form API array value path.
    */
   public function testExtractsUploadFromFormState(): void {
