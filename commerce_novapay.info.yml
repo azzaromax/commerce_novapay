@@ -5,6 +5,7 @@ package: Commerce
 core_version_requirement: ^11
 php: 8.3
 dependencies:
+  - drupal:telephone
   - commerce:commerce_checkout
   - commerce:commerce_order
   - commerce:commerce_payment

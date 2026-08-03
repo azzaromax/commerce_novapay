@@ -7,6 +7,7 @@ namespace Drupal\Tests\commerce_novapay\Unit\Order;
 use Drupal\Core\Field\FieldItemListInterface;
 use Drupal\commerce_novapay\Exception\OrderPayloadException;
 use Drupal\commerce_novapay\Order\OrderPayloadBuilder;
+use Drupal\commerce_novapay\Phone\OrderPhoneResolverInterface;
 use Drupal\commerce_novapay\Runtime\TransactionMode;
 use Drupal\commerce_order\Entity\OrderInterface;
 use Drupal\commerce_order\Entity\OrderItemInterface;
@@ -33,11 +34,20 @@ final class OrderPayloadBuilderTest extends TestCase {
   private OrderPayloadBuilder $builder;
 
   /**
+   * The order-context phone resolver.
+   */
+  private OrderPhoneResolverInterface&MockObject $phoneResolver;
+
+  /**
    * {@inheritdoc}
    */
   protected function setUp(): void {
     parent::setUp();
-    $this->builder = new OrderPayloadBuilder();
+    $this->phoneResolver = $this->createMock(
+      OrderPhoneResolverInterface::class,
+    );
+    $this->phoneResolver->method('resolve')->willReturn('+380501234567');
+    $this->builder = new OrderPayloadBuilder($this->phoneResolver);
   }
 
   /**
@@ -46,14 +56,6 @@ final class OrderPayloadBuilderTest extends TestCase {
   public function testBuildsSessionRequestFromOrderAndGateway(): void {
     $order = $this->createOrder(new Price('1250.00', 'UAH'));
     $order->method('getEmail')->willReturn(' buyer@example.com ');
-    $order->method('hasField')
-      ->with('novapay_phone')
-      ->willReturn(TRUE);
-    $phone_field = $this->createMock(FieldItemListInterface::class);
-    $phone_field->method('getString')->willReturn(' +380501234567 ');
-    $order->method('get')
-      ->with('novapay_phone')
-      ->willReturn($phone_field);
     $order->method('getBillingProfile')
       ->willReturn($this->createBillingProfile());
     $gateway = $this->createGateway();
@@ -305,17 +307,17 @@ final class OrderPayloadBuilderTest extends TestCase {
   }
 
   /**
-   * Tests that the required phone is read only from the dedicated order field.
+   * Tests rejection when no existing or checkout-collected phone is found.
    */
   public function testRejectsMissingOrderPhone(): void {
     $order = $this->createOrder(new Price('10.00', 'UAH'));
-    $order->method('hasField')
-      ->with('novapay_phone')
-      ->willReturn(FALSE);
+    $phone_resolver = $this->createMock(OrderPhoneResolverInterface::class);
+    $phone_resolver->method('resolve')->with($order)->willReturn(NULL);
+    $builder = new OrderPayloadBuilder($phone_resolver);
 
     $this->expectException(OrderPayloadException::class);
     $this->expectExceptionMessage('The NovaPay customer phone is unavailable.');
-    $this->builder->buildSessionRequest(
+    $builder->buildSessionRequest(
       $order,
       $this->createGateway(),
       'https://merchant.example/callback',

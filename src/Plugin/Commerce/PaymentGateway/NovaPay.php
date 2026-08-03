@@ -12,6 +12,7 @@ use Drupal\commerce_novapay\Credential\CredentialResolverInterface;
 use Drupal\commerce_novapay\Credential\NovaPayMode;
 use Drupal\commerce_novapay\Credential\RsaKeyValidatorInterface;
 use Drupal\commerce_novapay\Exception\InvalidRuntimeProfileException;
+use Drupal\commerce_novapay\Phone\CustomerProfilePhoneInspectorInterface;
 use Drupal\commerce_novapay\Runtime\RuntimeConfiguration;
 use Drupal\commerce_novapay\Runtime\RuntimeConfigurationProviderInterface;
 use Drupal\commerce_novapay\Runtime\RuntimeProfile;
@@ -63,6 +64,11 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
   private RequestStack $requestStack;
 
   /**
+   * The Commerce customer-profile phone inspector.
+   */
+  private CustomerProfilePhoneInspectorInterface $customerProfilePhoneInspector;
+
+  /**
    * {@inheritdoc}
    *
    * @param \Symfony\Component\DependencyInjection\ContainerInterface $container
@@ -96,6 +102,9 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
       'commerce_novapay.rsa_key_validator',
     );
     $instance->requestStack = $container->get('request_stack');
+    $instance->customerProfilePhoneInspector = $container->get(
+      'commerce_novapay.customer_profile_phone_inspector',
+    );
 
     return $instance;
   }
@@ -282,6 +291,8 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
       );
     }
 
+    $this->validateCustomerProfilePhones($form, $form_state);
+
     $live_values = $values['live_credentials'] ?? [];
     $merchant_id = is_array($live_values)
       ? trim((string) ($live_values['merchant_id'] ?? ''))
@@ -306,6 +317,43 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
         $this->t('NovaPay local settings cannot be saved securely.'),
       );
     }
+  }
+
+  /**
+   * Validates phone sources on all Commerce customer profile types.
+   *
+   * @param array<array-key, mixed> $form
+   *   The plugin configuration form.
+   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   *   The complete form state.
+   */
+  private function validateCustomerProfilePhones(
+    array &$form,
+    FormStateInterface $form_state,
+  ): void {
+    $readiness = $this->customerProfilePhoneInspector->inspect();
+    if ($readiness->isReady()) {
+      return;
+    }
+
+    $messages = [];
+    if ($readiness->getMissingTelephone() !== []) {
+      $messages[] = (string) $this->t(
+        'Add a Telephone field to these Commerce customer profile types and mark it as the NovaPay payment phone: @types.',
+        ['@types' => implode(', ', $readiness->getMissingTelephone())],
+      );
+    }
+    if ($readiness->getUnmarkedTelephone() !== []) {
+      $messages[] = (string) $this->t(
+        'A Telephone field exists on these Commerce customer profile types. Edit its field settings and select “Use this field as the NovaPay payment phone”: @types.',
+        ['@types' => implode(', ', $readiness->getUnmarkedTelephone())],
+      );
+    }
+
+    $form_state->setError(
+      $form['runtime_settings'],
+      implode(' ', $messages),
+    );
   }
 
   /**

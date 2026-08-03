@@ -7,6 +7,7 @@ namespace Drupal\commerce_novapay\Order;
 use Drupal\commerce_novapay\Api\Dto\Request\AddPaymentRequest;
 use Drupal\commerce_novapay\Api\Dto\Request\CreateSessionRequest;
 use Drupal\commerce_novapay\Exception\OrderPayloadException;
+use Drupal\commerce_novapay\Phone\OrderPhoneResolverInterface;
 use Drupal\commerce_novapay\Runtime\TransactionMode;
 use Drupal\commerce_order\Entity\OrderInterface;
 use Drupal\commerce_payment\Entity\PaymentGatewayInterface;
@@ -19,9 +20,14 @@ final class OrderPayloadBuilder implements OrderPayloadBuilderInterface {
 
   private const CURRENCY_CODE = 'UAH';
 
-  private const PHONE_FIELD = 'novapay_phone';
-
   private const MAX_PRODUCT_COUNT = '2147483647';
+
+  /**
+   * Constructs the order payload builder.
+   */
+  public function __construct(
+    private readonly OrderPhoneResolverInterface $phone_resolver,
+  ) {}
 
   /**
    * {@inheritdoc}
@@ -197,12 +203,8 @@ final class OrderPayloadBuilder implements OrderPayloadBuilderInterface {
    * Gets the required order phone field.
    */
   private function getPhone(OrderInterface $order): string {
-    if (!$order->hasField(self::PHONE_FIELD)) {
-      throw OrderPayloadException::missingPhone();
-    }
-
-    $phone = trim($order->get(self::PHONE_FIELD)->getString());
-    if ($phone === '') {
+    $phone = $this->phone_resolver->resolve($order);
+    if ($phone === NULL) {
       throw OrderPayloadException::missingPhone();
     }
 

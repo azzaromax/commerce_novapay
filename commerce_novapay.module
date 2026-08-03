@@ -6,6 +6,86 @@
  */
 
 use Drupal\commerce_payment\Entity\PaymentGatewayInterface;
+use Drupal\Core\Entity\EntityFormInterface;
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\field\FieldConfigInterface;
+
+/**
+ * Implements hook_form_FORM_ID_alter() for field_config_edit_form.
+ *
+ * @phpstan-param array<array-key, mixed> $form
+ */
+function commerce_novapay_form_field_config_edit_form_alter(
+  array &$form,
+  FormStateInterface $form_state,
+): void {
+  $form_object = $form_state->getFormObject();
+  if (!$form_object instanceof EntityFormInterface) {
+    return;
+  }
+  $field = $form_object->getEntity();
+  if (
+    !$field instanceof FieldConfigInterface
+    || $field->getType() !== 'telephone'
+    || !in_array(
+      $field->getTargetEntityTypeId(),
+      ['commerce_order', 'profile', 'user'],
+      TRUE,
+    )
+  ) {
+    return;
+  }
+
+  $form['commerce_novapay_payment_phone'] = [
+    '#type' => 'checkbox',
+    '#title' => t('Use this field as the NovaPay payment phone'),
+    '#description' => t(
+      'NovaPay will prefill its checkout phone from this field when the value is available and valid.',
+    ),
+    '#default_value' => $field->getThirdPartySetting(
+      'commerce_novapay',
+      'payment_phone',
+      FALSE,
+    ),
+    '#weight' => 20,
+  ];
+  $form['actions']['submit']['#submit'][] =
+    'commerce_novapay_field_config_edit_form_submit';
+}
+
+/**
+ * Saves the payment-phone designation on a telephone field.
+ *
+ * @param array<array-key, mixed> $form
+ *   The telephone field configuration form.
+ * @param \Drupal\Core\Form\FormStateInterface $form_state
+ *   The form state.
+ */
+function commerce_novapay_field_config_edit_form_submit(
+  array $form,
+  FormStateInterface $form_state,
+): void {
+  $form_object = $form_state->getFormObject();
+  if (!$form_object instanceof EntityFormInterface) {
+    return;
+  }
+  $field = $form_object->getEntity();
+  if (!$field instanceof FieldConfigInterface) {
+    return;
+  }
+
+  if ($form_state->getValue('commerce_novapay_payment_phone')) {
+    $field->setThirdPartySetting(
+      'commerce_novapay',
+      'payment_phone',
+      TRUE,
+    );
+  }
+  else {
+    $field->unsetThirdPartySetting('commerce_novapay', 'payment_phone');
+  }
+  $field->save();
+}
 
 /**
  * Implements hook_ENTITY_TYPE_predelete().

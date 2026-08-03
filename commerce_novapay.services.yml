@@ -32,9 +32,34 @@ services:
 
   commerce_novapay.order_payload_builder:
     class: Drupal\commerce_novapay\Order\OrderPayloadBuilder
+    arguments:
+      - '@commerce_novapay.order_phone_resolver'
 
   Drupal\commerce_novapay\Order\OrderPayloadBuilderInterface:
     alias: commerce_novapay.order_payload_builder
+
+  commerce_novapay.phone_normalizer:
+    class: Drupal\commerce_novapay\Phone\PhoneNormalizer
+
+  Drupal\commerce_novapay\Phone\PhoneNormalizerInterface:
+    alias: commerce_novapay.phone_normalizer
+
+  commerce_novapay.order_phone_resolver:
+    class: Drupal\commerce_novapay\Phone\OrderPhoneResolver
+    arguments:
+      - '@commerce_novapay.phone_normalizer'
+
+  Drupal\commerce_novapay\Phone\OrderPhoneResolverInterface:
+    alias: commerce_novapay.order_phone_resolver
+
+  commerce_novapay.customer_profile_phone_inspector:
+    class: Drupal\commerce_novapay\Phone\CustomerProfilePhoneInspector
+    arguments:
+      - '@entity_type.manager'
+      - '@entity_field.manager'
+
+  Drupal\commerce_novapay\Phone\CustomerProfilePhoneInspectorInterface:
+    alias: commerce_novapay.customer_profile_phone_inspector
 
   commerce_novapay.sandbox_credential_provider:
     class: Drupal\commerce_novapay\Credential\SandboxCredentialProvider
