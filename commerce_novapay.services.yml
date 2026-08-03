@@ -21,6 +21,15 @@ services:
   Drupal\commerce_novapay\Signature\VerifierInterface:
     alias: commerce_novapay.verifier
 
+  commerce_novapay.api_client:
+    class: Drupal\commerce_novapay\Api\NovaPayApiClient
+    arguments:
+      - '@http_client'
+      - '@commerce_novapay.signer'
+
+  Drupal\commerce_novapay\Api\NovaPayApiClientInterface:
+    alias: commerce_novapay.api_client
+
   commerce_novapay.sandbox_credential_provider:
     class: Drupal\commerce_novapay\Credential\SandboxCredentialProvider
     arguments:

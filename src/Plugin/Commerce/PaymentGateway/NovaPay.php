@@ -13,6 +13,7 @@ use Drupal\commerce_novapay\Credential\NovaPayMode;
 use Drupal\commerce_novapay\Credential\RsaKeyValidatorInterface;
 use Drupal\commerce_novapay\Exception\InvalidRuntimeProfileException;
 use Drupal\commerce_novapay\Runtime\RuntimeConfiguration;
+use Drupal\commerce_novapay\Runtime\RuntimeConfigurationProviderInterface;
 use Drupal\commerce_novapay\Runtime\RuntimeProfile;
 use Drupal\commerce_novapay\Runtime\RuntimeProfileStorageInterface;
 use Drupal\commerce_novapay\Runtime\TransactionMode;
@@ -37,7 +38,7 @@ use Symfony\Component\HttpFoundation\RequestStack;
   payment_type: 'novapay_payment',
   requires_billing_information: FALSE,
 )]
-final class NovaPay extends OffsitePaymentGatewayBase {
+final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigurationProviderInterface {
 
   private const MAX_KEY_BYTES = 65536;
 
