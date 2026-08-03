@@ -1,4 +1,9 @@
 services:
+  logger.channel.commerce_novapay:
+    parent: logger.channel_base
+    arguments:
+      - 'commerce_novapay'
+
   commerce_novapay.rsa_key_validator:
     class: Drupal\commerce_novapay\Credential\RsaKeyValidator
 
@@ -37,6 +42,16 @@ services:
 
   Drupal\commerce_novapay\Order\OrderPayloadBuilderInterface:
     alias: commerce_novapay.order_payload_builder
+
+  commerce_novapay.checkout_coordinator:
+    class: Drupal\commerce_novapay\Checkout\CheckoutCoordinator
+    arguments:
+      - '@entity_type.manager'
+      - '@commerce_novapay.api_client'
+      - '@commerce_novapay.order_payload_builder'
+
+  Drupal\commerce_novapay\Checkout\CheckoutCoordinatorInterface:
+    alias: commerce_novapay.checkout_coordinator
 
   commerce_novapay.phone_normalizer:
     class: Drupal\commerce_novapay\Phone\PhoneNormalizer

@@ -133,6 +133,35 @@ final class OrderPayloadBuilderTest extends TestCase {
   }
 
   /**
+   * Tests stable entity-ID fallback while a draft has no order number yet.
+   */
+  public function testBuildsDraftOrderWithoutAssignedOrderNumber(): void {
+    $order = $this->createOrder(new Price('10.00', 'UAH'), [], NULL);
+    $session = $this->builder->buildSessionRequest(
+      $order,
+      $this->createGateway(),
+      'https://merchant.example/callback',
+      'https://merchant.example/return',
+      'https://merchant.example/cancel',
+    );
+    $payment = $this->builder->buildPaymentRequest(
+      $order,
+      'session-123',
+      TransactionMode::Direct,
+    );
+
+    self::assertArrayNotHasKey(
+      'commerce_order_number',
+      $session->toArray()['metadata'],
+    );
+    self::assertSame('42', $payment->toArray()['external_id']);
+    self::assertSame(
+      'Order 42',
+      $payment->toArray()['products'][0]['description'],
+    );
+  }
+
+  /**
    * Tests aggregate fallback when item totals differ from the order balance.
    */
   public function testAggregatesProductsForOrderLevelAdjustment(): void {
@@ -333,6 +362,8 @@ final class OrderPayloadBuilderTest extends TestCase {
    *   Order balance returned by the mock.
    * @param list<\Drupal\commerce_order\Entity\OrderItemInterface> $items
    *   Order items returned by the mock.
+   * @param string|null $order_number
+   *   Assigned order number, or NULL for a draft order.
    *
    * @return \Drupal\commerce_order\Entity\OrderInterface&\PHPUnit\Framework\MockObject\MockObject
    *   The configured order mock.
@@ -340,12 +371,13 @@ final class OrderPayloadBuilderTest extends TestCase {
   private function createOrder(
     ?Price $balance,
     array $items = [],
+    ?string $order_number = 'ORDER-1001',
   ): OrderInterface & MockObject {
     $order = $this->createMock(OrderInterface::class);
     $order->method('id')->willReturn(42);
     $order->method('uuid')
       ->willReturn('dd3a9ee5-e090-44d1-924c-505b9272f85e');
-    $order->method('getOrderNumber')->willReturn('ORDER-1001');
+    $order->method('getOrderNumber')->willReturn($order_number);
     $order->method('getBalance')->willReturn($balance);
     $order->method('getItems')->willReturn($items);
 

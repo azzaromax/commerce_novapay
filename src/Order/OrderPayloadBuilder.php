@@ -40,13 +40,25 @@ final class OrderPayloadBuilder implements OrderPayloadBuilderInterface {
     string $fail_url,
   ): CreateSessionRequest {
     $this->getPayableBalance($order);
-    $order_number = $this->getOrderNumber($order);
     $order_id = $this->getOrderId($order);
     $order_uuid = $this->getOrderUuid($order);
     $gateway_id = $this->getGatewayId($gateway);
     $gateway_uuid = $this->getGatewayUuid($gateway);
     [$first_name, $last_name, $patronymic] = $this->getBillingName($order);
     $email = $this->getOptionalString($order->getEmail());
+    $metadata = [
+      'source' => 'drupal_commerce',
+      'commerce_order_id' => $order_id,
+      'commerce_order_uuid' => $order_uuid,
+    ];
+    $order_number = $this->getOptionalString($order->getOrderNumber());
+    if ($order_number !== NULL) {
+      $metadata['commerce_order_number'] = $order_number;
+    }
+    $metadata += [
+      'commerce_payment_gateway_id' => $gateway_id,
+      'commerce_payment_gateway_uuid' => $gateway_uuid,
+    ];
 
     return new CreateSessionRequest(
       client_phone: $this->getPhone($order),
@@ -54,14 +66,7 @@ final class OrderPayloadBuilder implements OrderPayloadBuilderInterface {
       client_last_name: $last_name,
       client_patronymic: $patronymic,
       client_email: $email,
-      metadata: [
-        'source' => 'drupal_commerce',
-        'commerce_order_id' => $order_id,
-        'commerce_order_uuid' => $order_uuid,
-        'commerce_order_number' => $order_number,
-        'commerce_payment_gateway_id' => $gateway_id,
-        'commerce_payment_gateway_uuid' => $gateway_uuid,
-      ],
+      metadata: $metadata,
       callback_url: $callback_url,
       success_url: $success_url,
       fail_url: $fail_url,
@@ -78,15 +83,15 @@ final class OrderPayloadBuilder implements OrderPayloadBuilderInterface {
     string $recipient_identifier = '',
   ): AddPaymentRequest {
     $balance = $this->getPayableBalance($order);
-    $order_number = $this->getOrderNumber($order);
+    $order_reference = $this->getOrderReference($order);
 
     return new AddPaymentRequest(
       session_id: $session_id,
       amount: $balance->getNumber(),
       use_hold: $transaction_mode === TransactionMode::Hold,
-      external_id: $order_number,
+      external_id: $order_reference,
       identifier: $this->getOptionalString($recipient_identifier),
-      products: $this->buildProducts($order, $balance, $order_number),
+      products: $this->buildProducts($order, $balance, $order_reference),
     );
   }
 
@@ -234,15 +239,15 @@ final class OrderPayloadBuilder implements OrderPayloadBuilderInterface {
   }
 
   /**
-   * Gets the required order number.
+   * Gets a stable external order reference before or after order placement.
    */
-  private function getOrderNumber(OrderInterface $order): string {
+  private function getOrderReference(OrderInterface $order): string {
     $order_number = $this->getOptionalString($order->getOrderNumber());
-    if ($order_number === NULL) {
-      throw OrderPayloadException::invalidOrderIdentifier();
+    if ($order_number !== NULL) {
+      return $order_number;
     }
 
-    return $order_number;
+    return $this->getOrderId($order);
   }
 
   /**

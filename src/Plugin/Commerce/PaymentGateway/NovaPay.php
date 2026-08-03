@@ -13,6 +13,7 @@ use Drupal\commerce_novapay\Credential\NovaPayMode;
 use Drupal\commerce_novapay\Credential\RsaKeyValidatorInterface;
 use Drupal\commerce_novapay\Exception\InvalidRuntimeProfileException;
 use Drupal\commerce_novapay\Phone\CustomerProfilePhoneInspectorInterface;
+use Drupal\commerce_novapay\PluginForm\NovaPayPaymentOffsiteForm;
 use Drupal\commerce_novapay\Runtime\RuntimeConfiguration;
 use Drupal\commerce_novapay\Runtime\RuntimeConfigurationProviderInterface;
 use Drupal\commerce_novapay\Runtime\RuntimeProfile;
@@ -21,8 +22,10 @@ use Drupal\commerce_novapay\Runtime\TransactionMode;
 use Drupal\commerce_payment\Attribute\CommercePaymentGateway;
 use Drupal\commerce_payment\Entity\PaymentGatewayInterface;
 use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\OffsitePaymentGatewayBase;
+use Drupal\commerce_order\Entity\OrderInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
@@ -34,6 +37,9 @@ use Symfony\Component\HttpFoundation\RequestStack;
   display_label: new TranslatableMarkup('NovaPay'),
   modes: [
     'n/a' => new TranslatableMarkup('Environment-local'),
+  ],
+  forms: [
+    'offsite-payment' => NovaPayPaymentOffsiteForm::class,
   ],
   payment_method_types: ['credit_card'],
   payment_type: 'novapay_payment',
@@ -416,6 +422,13 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
       $this->getGatewayUuid(),
     );
   }
+
+  /**
+   * {@inheritdoc}
+   *
+   * NovaPay postbacks are the only source of financial payment state.
+   */
+  public function onReturn(OrderInterface $order, Request $request): void {}
 
   /**
    * Validates optional live rotation uploads.

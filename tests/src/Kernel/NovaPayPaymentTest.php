@@ -11,10 +11,12 @@ use Drupal\commerce_novapay\Phone\CustomerProfilePhoneInspector;
 use Drupal\commerce_novapay\Phone\CustomerProfilePhoneInspectorInterface;
 use Drupal\commerce_novapay\Plugin\Commerce\PaymentType\NovaPayPayment;
 use Drupal\commerce_novapay\Phone\OrderPhoneResolverInterface;
+use Drupal\commerce_novapay\PluginForm\NovaPayPaymentOffsiteForm;
 use Drupal\commerce_order\Entity\Order;
 use Drupal\commerce_order\Entity\OrderItem;
 use Drupal\commerce_payment\Entity\PaymentGateway;
 use Drupal\commerce_payment\Entity\PaymentInterface;
+use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\OffsitePaymentGatewayInterface;
 use Drupal\commerce_price\Price;
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
@@ -23,6 +25,7 @@ use Drupal\state_machine\WorkflowManagerInterface;
 use Drupal\user\Entity\User;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Tests the NovaPay payment type, workflow, fields, and order integration.
@@ -99,6 +102,10 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
     self::assertSame(
       'novapay_payment',
       $this->paymentGateway->getPlugin()->getPaymentType()->getPluginId(),
+    );
+    self::assertSame(
+      NovaPayPaymentOffsiteForm::class,
+      $this->paymentGateway->getPlugin()->getFormClass('offsite-payment'),
     );
 
     /** @var \Drupal\state_machine\WorkflowManagerInterface $workflow_manager */
@@ -209,6 +216,29 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
       new Price('0', 'USD'),
       $this->order->getTotalPaid(),
     );
+  }
+
+  /**
+   * Tests that an untrusted browser return cannot create or complete payment.
+   */
+  public function testBrowserReturnDoesNotChangePaymentState(): void {
+    $payment_storage = $this->container
+      ->get('entity_type.manager')
+      ->getStorage('commerce_payment');
+    $query = $payment_storage->getQuery()
+      ->accessCheck(FALSE)
+      ->condition('order_id', $this->order->id());
+    self::assertSame(0, (int) $query->count()->execute());
+
+    $plugin = $this->paymentGateway->getPlugin();
+    self::assertInstanceOf(OffsitePaymentGatewayInterface::class, $plugin);
+    $plugin->onReturn(
+      $this->order,
+      new Request(['status' => 'paid', 'session_id' => 'untrusted']),
+    );
+
+    self::assertSame(0, (int) $query->count()->execute());
+    self::assertEquals(new Price('0', 'USD'), $this->order->getTotalPaid());
   }
 
   /**
