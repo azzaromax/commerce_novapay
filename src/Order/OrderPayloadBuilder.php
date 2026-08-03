@@ -1,0 +1,322 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Drupal\commerce_novapay\Order;
+
+use Drupal\commerce_novapay\Api\Dto\Request\AddPaymentRequest;
+use Drupal\commerce_novapay\Api\Dto\Request\CreateSessionRequest;
+use Drupal\commerce_novapay\Exception\OrderPayloadException;
+use Drupal\commerce_novapay\Runtime\TransactionMode;
+use Drupal\commerce_order\Entity\OrderInterface;
+use Drupal\commerce_payment\Entity\PaymentGatewayInterface;
+use Drupal\commerce_price\Price;
+
+/**
+ * Converts Commerce order data to NovaPay acquiring request DTOs.
+ */
+final class OrderPayloadBuilder implements OrderPayloadBuilderInterface {
+
+  private const CURRENCY_CODE = 'UAH';
+
+  private const PHONE_FIELD = 'novapay_phone';
+
+  private const MAX_PRODUCT_COUNT = '2147483647';
+
+  /**
+   * {@inheritdoc}
+   */
+  public function buildSessionRequest(
+    OrderInterface $order,
+    PaymentGatewayInterface $gateway,
+    string $callback_url,
+    string $success_url,
+    string $fail_url,
+  ): CreateSessionRequest {
+    $this->getPayableBalance($order);
+    $order_number = $this->getOrderNumber($order);
+    $order_id = $this->getOrderId($order);
+    $order_uuid = $this->getOrderUuid($order);
+    $gateway_id = $this->getGatewayId($gateway);
+    $gateway_uuid = $this->getGatewayUuid($gateway);
+    [$first_name, $last_name, $patronymic] = $this->getBillingName($order);
+    $email = $this->getOptionalString($order->getEmail());
+
+    return new CreateSessionRequest(
+      client_phone: $this->getPhone($order),
+      client_first_name: $first_name,
+      client_last_name: $last_name,
+      client_patronymic: $patronymic,
+      client_email: $email,
+      metadata: [
+        'source' => 'drupal_commerce',
+        'commerce_order_id' => $order_id,
+        'commerce_order_uuid' => $order_uuid,
+        'commerce_order_number' => $order_number,
+        'commerce_payment_gateway_id' => $gateway_id,
+        'commerce_payment_gateway_uuid' => $gateway_uuid,
+      ],
+      callback_url: $callback_url,
+      success_url: $success_url,
+      fail_url: $fail_url,
+    );
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function buildPaymentRequest(
+    OrderInterface $order,
+    string $session_id,
+    TransactionMode $transaction_mode,
+    string $recipient_identifier = '',
+  ): AddPaymentRequest {
+    $balance = $this->getPayableBalance($order);
+    $order_number = $this->getOrderNumber($order);
+
+    return new AddPaymentRequest(
+      session_id: $session_id,
+      amount: $balance->getNumber(),
+      use_hold: $transaction_mode === TransactionMode::Hold,
+      external_id: $order_number,
+      identifier: $this->getOptionalString($recipient_identifier),
+      products: $this->buildProducts($order, $balance, $order_number),
+    );
+  }
+
+  /**
+   * Gets and validates the current payable order balance.
+   */
+  private function getPayableBalance(OrderInterface $order): Price {
+    $balance = $order->getBalance();
+    if (!$balance instanceof Price) {
+      throw OrderPayloadException::missingBalance();
+    }
+    if ($balance->getCurrencyCode() !== self::CURRENCY_CODE) {
+      throw OrderPayloadException::unsupportedCurrency();
+    }
+    if (!$balance->isPositive()) {
+      throw OrderPayloadException::nonPositiveBalance();
+    }
+
+    return $balance;
+  }
+
+  /**
+   * Builds exact detailed products or one safe aggregate product.
+   *
+   * @return list<array{count: int, price: string, description: string}>
+   *   NovaPay product values.
+   */
+  private function buildProducts(
+    OrderInterface $order,
+    Price $balance,
+    string $order_number,
+  ): array {
+    $products = [];
+    $products_total = new Price('0', self::CURRENCY_CODE);
+
+    foreach ($order->getItems() as $index => $order_item) {
+      $count = $this->getProductCount($order_item->getQuantity());
+      if ($count === NULL) {
+        return $this->buildAggregateProduct($balance, $order_number);
+      }
+
+      $unit_price = $order_item->getAdjustedUnitPrice();
+      if (
+        !$unit_price instanceof Price
+        || $unit_price->getCurrencyCode() !== self::CURRENCY_CODE
+        || !$unit_price->isPositive()
+      ) {
+        return $this->buildAggregateProduct($balance, $order_number);
+      }
+
+      $line_total = $unit_price->multiply((string) $count);
+      $products_total = $products_total->add($line_total);
+      $description = trim($order_item->getTitle());
+      if ($description === '') {
+        $description = 'Order item ' . ((int) $index + 1);
+      }
+      $products[] = [
+        'count' => $count,
+        'price' => $unit_price->getNumber(),
+        'description' => $description,
+      ];
+    }
+
+    if ($products === [] || !$products_total->equals($balance)) {
+      return $this->buildAggregateProduct($balance, $order_number);
+    }
+
+    return $products;
+  }
+
+  /**
+   * Builds one product guaranteed to equal the payable balance.
+   *
+   * @return list<array{count: int, price: string, description: string}>
+   *   The aggregate NovaPay product.
+   */
+  private function buildAggregateProduct(
+    Price $balance,
+    string $order_number,
+  ): array {
+    return [[
+      'count' => 1,
+      'price' => $balance->getNumber(),
+      'description' => 'Order ' . $order_number,
+    ]];
+  }
+
+  /**
+   * Converts a positive whole-number Commerce quantity to int32.
+   */
+  private function getProductCount(string $quantity): ?int {
+    if (preg_match('/^([0-9]+)(?:\.0+)?$/D', $quantity, $matches) !== 1) {
+      return NULL;
+    }
+
+    $normalized = ltrim($matches[1], '0');
+    if ($normalized === '') {
+      return NULL;
+    }
+    if (
+      strlen($normalized) > strlen(self::MAX_PRODUCT_COUNT)
+      || (
+        strlen($normalized) === strlen(self::MAX_PRODUCT_COUNT)
+        && strcmp($normalized, self::MAX_PRODUCT_COUNT) > 0
+      )
+    ) {
+      return NULL;
+    }
+
+    return (int) $normalized;
+  }
+
+  /**
+   * Gets the required order phone field.
+   */
+  private function getPhone(OrderInterface $order): string {
+    if (!$order->hasField(self::PHONE_FIELD)) {
+      throw OrderPayloadException::missingPhone();
+    }
+
+    $phone = trim($order->get(self::PHONE_FIELD)->getString());
+    if ($phone === '') {
+      throw OrderPayloadException::missingPhone();
+    }
+
+    return $phone;
+  }
+
+  /**
+   * Gets optional billing name parts from the address field.
+   *
+   * @return array{?string, ?string, ?string}
+   *   First name, last name, and patronymic.
+   */
+  private function getBillingName(OrderInterface $order): array {
+    $profile = $order->getBillingProfile();
+    if ($profile === NULL || !$profile->hasField('address')) {
+      return [NULL, NULL, NULL];
+    }
+
+    $values = $profile->get('address')->getValue();
+    $address = is_array($values[0] ?? NULL) ? $values[0] : [];
+
+    return [
+      $this->getOptionalString($address['given_name'] ?? NULL),
+      $this->getOptionalString($address['family_name'] ?? NULL),
+      $this->getOptionalString($address['additional_name'] ?? NULL),
+    ];
+  }
+
+  /**
+   * Gets the required order number.
+   */
+  private function getOrderNumber(OrderInterface $order): string {
+    $order_number = $this->getOptionalString($order->getOrderNumber());
+    if ($order_number === NULL) {
+      throw OrderPayloadException::invalidOrderIdentifier();
+    }
+
+    return $order_number;
+  }
+
+  /**
+   * Gets the required Commerce order entity ID.
+   */
+  private function getOrderId(OrderInterface $order): string {
+    return $this->requireIdentifier(
+      $order->id(),
+      OrderPayloadException::invalidOrderIdentifier(...),
+    );
+  }
+
+  /**
+   * Gets the required Commerce order UUID.
+   */
+  private function getOrderUuid(OrderInterface $order): string {
+    return $this->requireIdentifier(
+      $order->uuid(),
+      OrderPayloadException::invalidOrderIdentifier(...),
+    );
+  }
+
+  /**
+   * Gets the required Commerce payment gateway config ID.
+   */
+  private function getGatewayId(PaymentGatewayInterface $gateway): string {
+    return $this->requireIdentifier(
+      $gateway->id(),
+      OrderPayloadException::invalidGatewayIdentifier(...),
+    );
+  }
+
+  /**
+   * Gets the required Commerce payment gateway UUID.
+   */
+  private function getGatewayUuid(PaymentGatewayInterface $gateway): string {
+    return $this->requireIdentifier(
+      $gateway->uuid(),
+      OrderPayloadException::invalidGatewayIdentifier(...),
+    );
+  }
+
+  /**
+   * Converts an entity identifier to a required string.
+   *
+   * @param mixed $value
+   *   Entity identifier value.
+   * @param callable(): \Drupal\commerce_novapay\Exception\OrderPayloadException $exception_factory
+   *   Safe exception factory for the identifier type.
+   */
+  private function requireIdentifier(
+    mixed $value,
+    callable $exception_factory,
+  ): string {
+    if (!is_int($value) && !is_string($value)) {
+      throw $exception_factory();
+    }
+
+    $identifier = trim((string) $value);
+    if ($identifier === '') {
+      throw $exception_factory();
+    }
+
+    return $identifier;
+  }
+
+  /**
+   * Trims an optional scalar string value.
+   */
+  private function getOptionalString(mixed $value): ?string {
+    if (!is_string($value)) {
+      return NULL;
+    }
+
+    $value = trim($value);
+    return $value !== '' ? $value : NULL;
+  }
+
+}

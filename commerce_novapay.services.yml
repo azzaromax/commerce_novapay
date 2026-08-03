@@ -30,6 +30,12 @@ services:
   Drupal\commerce_novapay\Api\NovaPayApiClientInterface:
     alias: commerce_novapay.api_client
 
+  commerce_novapay.order_payload_builder:
+    class: Drupal\commerce_novapay\Order\OrderPayloadBuilder
+
+  Drupal\commerce_novapay\Order\OrderPayloadBuilderInterface:
+    alias: commerce_novapay.order_payload_builder
+
   commerce_novapay.sandbox_credential_provider:
     class: Drupal\commerce_novapay\Credential\SandboxCredentialProvider
     arguments:
