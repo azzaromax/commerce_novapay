@@ -10,6 +10,9 @@ use Drupal\Tests\commerce_order\Kernel\OrderKernelTestBase;
 use Drupal\commerce_novapay\Phone\CustomerProfilePhoneInspector;
 use Drupal\commerce_novapay\Phone\CustomerProfilePhoneInspectorInterface;
 use Drupal\commerce_novapay\Plugin\Commerce\PaymentType\NovaPayPayment;
+use Drupal\commerce_novapay\Postback\NovaPayStatus;
+use Drupal\commerce_novapay\Postback\PaymentStatusMapper;
+use Drupal\commerce_novapay\Postback\PaymentStatusMapperInterface;
 use Drupal\commerce_novapay\Phone\OrderPhoneResolverInterface;
 use Drupal\commerce_novapay\PluginForm\NovaPayPaymentOffsiteForm;
 use Drupal\commerce_order\Entity\Order;
@@ -32,6 +35,7 @@ use Symfony\Component\HttpFoundation\Request;
  */
 #[CoversClass(NovaPayPayment::class)]
 #[CoversClass(CustomerProfilePhoneInspector::class)]
+#[CoversClass(PaymentStatusMapper::class)]
 #[Group('commerce_novapay')]
 final class NovaPayPaymentTest extends OrderKernelTestBase {
 
@@ -239,6 +243,41 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
 
     self::assertSame(0, (int) $query->count()->execute());
     self::assertEquals(new Price('0', 'USD'), $this->order->getTotalPaid());
+  }
+
+  /**
+   * Tests real workflow persistence for verified hold postback statuses.
+   */
+  public function testPostbackStatusMappingPersistsWorkflowTransitions(): void {
+    $payment_storage = $this->container
+      ->get('entity_type.manager')
+      ->getStorage('commerce_payment');
+    /** @var \Drupal\commerce_payment\Entity\PaymentInterface $payment */
+    $payment = $payment_storage->create([
+      'payment_gateway' => $this->paymentGateway,
+      'order_id' => $this->order->id(),
+      'amount' => new Price('30', 'USD'),
+      'state' => 'pending',
+      'remote_id' => 'postback-session',
+      'remote_state' => 'created',
+    ]);
+    $payment->save();
+    $mapper = $this->container->get(
+      'commerce_novapay.postback.status_mapper',
+    );
+    self::assertInstanceOf(PaymentStatusMapperInterface::class, $mapper);
+
+    $mapper->apply($payment, NovaPayStatus::Holded);
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    self::assertSame('authorization', $payment->getState()->getId());
+    self::assertSame('holded', $payment->getRemoteState());
+
+    $mapper->apply($payment, NovaPayStatus::HoldConfirmed);
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    self::assertSame('completed', $payment->getState()->getId());
+    self::assertSame('hold_confirmed', $payment->getRemoteState());
   }
 
   /**

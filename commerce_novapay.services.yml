@@ -26,6 +26,14 @@ services:
   Drupal\commerce_novapay\Signature\VerifierInterface:
     alias: commerce_novapay.verifier
 
+  commerce_novapay.sandbox_legacy_verifier:
+    class: Drupal\commerce_novapay\Signature\RsaSha1SandboxVerifier
+    arguments:
+      - '@commerce_novapay.rsa_key_validator'
+
+  Drupal\commerce_novapay\Signature\SandboxLegacyVerifierInterface:
+    alias: commerce_novapay.sandbox_legacy_verifier
+
   commerce_novapay.api_client:
     class: Drupal\commerce_novapay\Api\NovaPayApiClient
     arguments:
@@ -54,6 +62,39 @@ services:
 
   Drupal\commerce_novapay\Checkout\CheckoutCoordinatorInterface:
     alias: commerce_novapay.checkout_coordinator
+
+  commerce_novapay.postback.v1_parser:
+    class: Drupal\commerce_novapay\Postback\Parser\V1PostbackParser
+
+  commerce_novapay.postback.v2_parser:
+    class: Drupal\commerce_novapay\Postback\Parser\V2PostbackParser
+
+  commerce_novapay.postback.parser:
+    class: Drupal\commerce_novapay\Postback\Parser\PostbackParser
+    arguments:
+      - '@commerce_novapay.postback.v1_parser'
+      - '@commerce_novapay.postback.v2_parser'
+
+  Drupal\commerce_novapay\Postback\Parser\PostbackParserInterface:
+    alias: commerce_novapay.postback.parser
+
+  commerce_novapay.postback.status_mapper:
+    class: Drupal\commerce_novapay\Postback\PaymentStatusMapper
+
+  Drupal\commerce_novapay\Postback\PaymentStatusMapperInterface:
+    alias: commerce_novapay.postback.status_mapper
+
+  commerce_novapay.postback.processor:
+    class: Drupal\commerce_novapay\Postback\PostbackProcessor
+    arguments:
+      - '@commerce_novapay.verifier'
+      - '@commerce_novapay.sandbox_legacy_verifier'
+      - '@commerce_novapay.postback.parser'
+      - '@entity_type.manager'
+      - '@commerce_novapay.postback.status_mapper'
+
+  Drupal\commerce_novapay\Postback\PostbackProcessorInterface:
+    alias: commerce_novapay.postback.processor
 
   commerce_novapay.phone_normalizer:
     class: Drupal\commerce_novapay\Phone\PhoneNormalizer

@@ -14,6 +14,8 @@ use Drupal\commerce_novapay\Credential\RsaKeyValidatorInterface;
 use Drupal\commerce_novapay\Exception\InvalidRuntimeProfileException;
 use Drupal\commerce_novapay\Phone\CustomerProfilePhoneInspectorInterface;
 use Drupal\commerce_novapay\PluginForm\NovaPayPaymentOffsiteForm;
+use Drupal\commerce_novapay\Postback\PostbackOutcome;
+use Drupal\commerce_novapay\Postback\PostbackProcessorInterface;
 use Drupal\commerce_novapay\Runtime\RuntimeConfiguration;
 use Drupal\commerce_novapay\Runtime\RuntimeConfigurationProviderInterface;
 use Drupal\commerce_novapay\Runtime\RuntimeProfile;
@@ -23,10 +25,12 @@ use Drupal\commerce_payment\Attribute\CommercePaymentGateway;
 use Drupal\commerce_payment\Entity\PaymentGatewayInterface;
 use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\OffsitePaymentGatewayBase;
 use Drupal\commerce_order\Entity\OrderInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Provides the NovaPay off-site payment gateway.
@@ -75,6 +79,16 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
   private CustomerProfilePhoneInspectorInterface $customerProfilePhoneInspector;
 
   /**
+   * The signature-first NovaPay postback processor.
+   */
+  private PostbackProcessorInterface $postbackProcessor;
+
+  /**
+   * The sanitized NovaPay logger channel.
+   */
+  private LoggerInterface $logger;
+
+  /**
    * {@inheritdoc}
    *
    * @param \Symfony\Component\DependencyInjection\ContainerInterface $container
@@ -110,6 +124,12 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
     $instance->requestStack = $container->get('request_stack');
     $instance->customerProfilePhoneInspector = $container->get(
       'commerce_novapay.customer_profile_phone_inspector',
+    );
+    $instance->postbackProcessor = $container->get(
+      'commerce_novapay.postback.processor',
+    );
+    $instance->logger = $container->get(
+      'logger.channel.commerce_novapay',
     );
 
     return $instance;
@@ -429,6 +449,51 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
    * NovaPay postbacks are the only source of financial payment state.
    */
   public function onReturn(OrderInterface $order, Request $request): void {}
+
+  /**
+   * {@inheritdoc}
+   */
+  public function onNotify(Request $request): Response {
+    $gateway = $this->parentEntity;
+    try {
+      $result = $this->postbackProcessor->process(
+        $gateway,
+        $this,
+        $request->getContent(),
+        (string) $request->headers->get('x-sign', ''),
+      );
+    }
+    catch (\Throwable $exception) {
+      $this->logger->error(
+        'NovaPay postback processing failed for gateway @gateway: @source.',
+        [
+          '@gateway' => (string) $gateway->id(),
+          '@source' => $exception::class,
+        ],
+      );
+      return new Response('', Response::HTTP_INTERNAL_SERVER_ERROR);
+    }
+
+    $version = $result->getVersion();
+    $status = $result->getStatus();
+    $context = [
+      '@gateway' => (string) $gateway->id(),
+      '@outcome' => $result->getOutcome()->value,
+      '@version' => $version === NULL ? 'unknown' : $version->value,
+      '@status' => $status === NULL ? 'unknown' : $status->value,
+    ];
+    $this->logger->notice(
+      'NovaPay postback for gateway @gateway: @outcome (@version, @status).',
+      $context,
+    );
+
+    return new Response('', match ($result->getOutcome()) {
+      PostbackOutcome::InvalidSignature => Response::HTTP_FORBIDDEN,
+      PostbackOutcome::InvalidPayload => Response::HTTP_BAD_REQUEST,
+      PostbackOutcome::Applied,
+      PostbackOutcome::UnknownPayment => Response::HTTP_OK,
+    });
+  }
 
   /**
    * Validates optional live rotation uploads.
