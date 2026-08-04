@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Drupal\commerce_novapay\Checkout;
 
+use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Field\EntityReferenceFieldItemListInterface;
+use Drupal\Core\Lock\LockBackendInterface;
 use Drupal\commerce_novapay\Api\Dto\Response\PaymentResponse;
 use Drupal\commerce_novapay\Api\NovaPayApiClientInterface;
 use Drupal\commerce_novapay\Credential\NovaPayMode;
@@ -26,6 +28,12 @@ use Drupal\commerce_price\Price;
  */
 final class CheckoutCoordinator implements CheckoutCoordinatorInterface {
 
+  private const CHECKOUT_LOCK_TIMEOUT_SECONDS = 60.0;
+
+  private const CHECKOUT_LOCK_WAIT_SECONDS = 60;
+
+  private const SESSION_LIFETIME_SECONDS = 2592000;
+
   /**
    * Constructs the NovaPay checkout coordinator.
    */
@@ -33,6 +41,8 @@ final class CheckoutCoordinator implements CheckoutCoordinatorInterface {
     private readonly EntityTypeManagerInterface $entity_type_manager,
     private readonly NovaPayApiClientInterface $api_client,
     private readonly OrderPayloadBuilderInterface $payload_builder,
+    private readonly LockBackendInterface $checkout_lock,
+    private readonly TimeInterface $time,
   ) {}
 
   /**
@@ -46,8 +56,14 @@ final class CheckoutCoordinator implements CheckoutCoordinatorInterface {
     $stage = 'order_id';
     $order_id = NULL;
     $order_storage = NULL;
+    $checkout_lock_id = NULL;
+    $checkout_lock_acquired = FALSE;
     try {
       $order_id = $this->getOrderId($payment);
+      $stage = 'checkout_lock';
+      $checkout_lock_id = 'commerce_novapay_checkout:' . $order_id;
+      $this->acquireCheckoutLock($checkout_lock_id);
+      $checkout_lock_acquired = TRUE;
       $stage = 'order_storage';
       $order_storage = $this->entity_type_manager
         ->getStorage('commerce_order');
@@ -59,6 +75,13 @@ final class CheckoutCoordinator implements CheckoutCoordinatorInterface {
       $order = $order_storage->loadForUpdate($order_id);
       if (!$order instanceof OrderInterface) {
         throw new \RuntimeException('The Commerce order is unavailable.');
+      }
+      $stage = 'checkout_lock_renewal';
+      if (!$this->checkout_lock->acquire(
+        $checkout_lock_id,
+        self::CHECKOUT_LOCK_TIMEOUT_SECONDS,
+      )) {
+        throw new \RuntimeException('The NovaPay checkout lock was lost.');
       }
 
       $stage = 'gateway_validation';
@@ -115,7 +138,10 @@ final class CheckoutCoordinator implements CheckoutCoordinatorInterface {
       $payment->setAmount($balance);
       $payment->setState('pending');
       $payment->setRemoteId($session->getSessionId());
-      $payment->setRemoteState('pending');
+      $payment->setRemoteState('created');
+      $payment->setExpiresTime(
+        $this->time->getRequestTime() + self::SESSION_LIFETIME_SECONDS,
+      );
       $payment->set('novapay_operation_id', $response->getOperationId());
       $payment->set('novapay_payment_url', $response->getPaymentUrl());
       $payment->save();
@@ -132,7 +158,37 @@ final class CheckoutCoordinator implements CheckoutCoordinatorInterface {
       ) {
         $order_storage->releaseLock($order_id);
       }
+      if ($checkout_lock_acquired && is_string($checkout_lock_id)) {
+        $this->checkout_lock->release($checkout_lock_id);
+      }
     }
+  }
+
+  /**
+   * Acquires the checkout lock with enough time for both NovaPay API calls.
+   */
+  private function acquireCheckoutLock(string $lock_id): void {
+    if ($this->checkout_lock->acquire(
+      $lock_id,
+      self::CHECKOUT_LOCK_TIMEOUT_SECONDS,
+    )) {
+      return;
+    }
+
+    if (
+      !$this->checkout_lock->wait(
+        $lock_id,
+        self::CHECKOUT_LOCK_WAIT_SECONDS,
+      )
+      && $this->checkout_lock->acquire(
+        $lock_id,
+        self::CHECKOUT_LOCK_TIMEOUT_SECONDS,
+      )
+    ) {
+      return;
+    }
+
+    throw new \RuntimeException('The NovaPay checkout is already being prepared.');
   }
 
   /**
@@ -206,6 +262,7 @@ final class CheckoutCoordinator implements CheckoutCoordinatorInterface {
     if (!$balance instanceof Price) {
       return NULL;
     }
+    $request_time = $this->time->getRequestTime();
 
     foreach ($payments as $candidate) {
       if (!$candidate instanceof PaymentInterface) {
@@ -218,6 +275,7 @@ final class CheckoutCoordinator implements CheckoutCoordinatorInterface {
       if (
         !$amount instanceof Price
         || !$amount->equals($balance)
+        || $candidate->getExpiresTime() <= $request_time
         || !is_string($session_id)
         || trim($session_id) === ''
       ) {

@@ -49,6 +49,8 @@ services:
       - '@entity_type.manager'
       - '@commerce_novapay.api_client'
       - '@commerce_novapay.order_payload_builder'
+      - '@lock'
+      - '@datetime.time'
 
   Drupal\commerce_novapay\Checkout\CheckoutCoordinatorInterface:
     alias: commerce_novapay.checkout_coordinator

@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\commerce_novapay\Unit\Checkout;
 
+use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Field\EntityReferenceFieldItemListInterface;
 use Drupal\Core\Field\FieldItemListInterface;
+use Drupal\Core\Lock\LockBackendInterface;
 use Drupal\Core\Url;
 use Drupal\commerce_novapay\Api\Dto\Request\AddPaymentRequest;
 use Drupal\commerce_novapay\Api\Dto\Request\CreateSessionRequest;
@@ -42,6 +44,8 @@ use PHPUnit\Framework\TestCase;
 #[Group('commerce_novapay')]
 final class CheckoutCoordinatorTest extends TestCase {
 
+  private const REQUEST_TIME = 1700000000;
+
   /**
    * The entity type manager.
    */
@@ -66,6 +70,16 @@ final class CheckoutCoordinatorTest extends TestCase {
    * The order payload builder.
    */
   private OrderPayloadBuilderInterface&MockObject $payloadBuilder;
+
+  /**
+   * The lock protecting the complete NovaPay checkout operation.
+   */
+  private LockBackendInterface&MockObject $checkoutLock;
+
+  /**
+   * The Drupal request time service.
+   */
+  private TimeInterface&MockObject $time;
 
   /**
    * The locked Commerce order.
@@ -112,6 +126,8 @@ final class CheckoutCoordinatorTest extends TestCase {
     $this->payloadBuilder = $this->createMock(
       OrderPayloadBuilderInterface::class,
     );
+    $this->checkoutLock = $this->createMock(LockBackendInterface::class);
+    $this->time = $this->createMock(TimeInterface::class);
     $this->order = $this->createMock(OrderInterface::class);
     $this->gateway = $this->createMock(PaymentGatewayInterface::class);
     /** @var \Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\OffsitePaymentGatewayInterface&\Drupal\commerce_novapay\Runtime\RuntimeConfigurationProviderInterface&\PHPUnit\Framework\MockObject\MockObject $plugin */
@@ -154,11 +170,14 @@ final class CheckoutCoordinatorTest extends TestCase {
       'https://merchant.example/novapay/notify',
     );
     $this->plugin->method('getNotifyUrl')->willReturn($notify_url);
+    $this->time->method('getRequestTime')->willReturn(self::REQUEST_TIME);
 
     $this->coordinator = new CheckoutCoordinator(
       $this->entityTypeManager,
       $this->apiClient,
       $this->payloadBuilder,
+      $this->checkoutLock,
+      $this->time,
     );
   }
 
@@ -166,6 +185,11 @@ final class CheckoutCoordinatorTest extends TestCase {
    * Tests creation and persistence of a pending NovaPay payment.
    */
   public function testCreatesAndPersistsPaymentUnderOrderLock(): void {
+    $this->checkoutLock->expects(self::exactly(2))->method('acquire')
+      ->with('commerce_novapay_checkout:10', 60.0)
+      ->willReturn(TRUE);
+    $this->checkoutLock->expects(self::once())->method('release')
+      ->with('commerce_novapay_checkout:10');
     $this->paymentStorage->method('loadByProperties')->willReturn([]);
     $session_request = new CreateSessionRequest('+380501234567');
     $payment_request = new AddPaymentRequest(
@@ -215,7 +239,9 @@ final class CheckoutCoordinatorTest extends TestCase {
     $this->payment->expects(self::once())->method('setRemoteId')
       ->with('session-id')->willReturnSelf();
     $this->payment->expects(self::once())->method('setRemoteState')
-      ->with('pending')->willReturnSelf();
+      ->with('created')->willReturnSelf();
+    $this->payment->expects(self::once())->method('setExpiresTime')
+      ->with(self::REQUEST_TIME + 2592000)->willReturnSelf();
     $this->payment->expects(self::exactly(2))->method('set')
       ->willReturnCallback(function (string $field, string $value): PaymentInterface {
         self::assertContains(
@@ -244,10 +270,14 @@ final class CheckoutCoordinatorTest extends TestCase {
    * Tests that a matching pending payment prevents duplicate API calls.
    */
   public function testReusesNewestMatchingPendingPayment(): void {
+    $this->allowCheckoutLock();
     $candidate = $this->createMock(PaymentInterface::class);
     $candidate->method('id')->willReturn(25);
     $candidate->method('getAmount')->willReturn($this->balance);
     $candidate->method('getRemoteId')->willReturn('existing-session');
+    $candidate->method('getExpiresTime')->willReturn(
+      self::REQUEST_TIME + 3600,
+    );
     $operation = $this->createMock(FieldItemListInterface::class);
     $operation->method('getString')->willReturn('existing-operation');
     $url = $this->createMock(FieldItemListInterface::class);
@@ -272,6 +302,8 @@ final class CheckoutCoordinatorTest extends TestCase {
       ->method('buildSessionRequest');
     $this->payment->expects(self::never())->method('save');
     $this->orderStorage->expects(self::once())->method('releaseLock')->with(10);
+    $this->checkoutLock->expects(self::once())->method('release')
+      ->with('commerce_novapay_checkout:10');
 
     self::assertSame(
       'https://qecom.novapay.ua/existing-session',
@@ -287,6 +319,7 @@ final class CheckoutCoordinatorTest extends TestCase {
    * Tests that an API failure never leaks the acquired order lock.
    */
   public function testReleasesOrderLockAfterApiFailure(): void {
+    $this->allowCheckoutLock();
     $this->paymentStorage->method('loadByProperties')->willReturn([]);
     $session_request = new CreateSessionRequest('+380501234567');
     $this->payloadBuilder->method('buildSessionRequest')
@@ -297,6 +330,8 @@ final class CheckoutCoordinatorTest extends TestCase {
     $this->apiClient->expects(self::never())->method('addPayment');
     $this->payment->expects(self::never())->method('save');
     $this->orderStorage->expects(self::once())->method('releaseLock')->with(10);
+    $this->checkoutLock->expects(self::once())->method('release')
+      ->with('commerce_novapay_checkout:10');
 
     try {
       $this->coordinator->prepareRedirect(
@@ -316,6 +351,77 @@ final class CheckoutCoordinatorTest extends TestCase {
       self::assertNull($exception->getApiDetail());
       self::assertNull($exception->getPrevious());
     }
+  }
+
+  /**
+   * Tests that an expired pending payment is never reused.
+   */
+  public function testDoesNotReuseExpiredPendingPayment(): void {
+    $this->allowCheckoutLock();
+    $candidate = $this->createMock(PaymentInterface::class);
+    $candidate->method('id')->willReturn(25);
+    $candidate->method('getAmount')->willReturn($this->balance);
+    $candidate->method('getRemoteId')->willReturn('expired-session');
+    $candidate->method('getExpiresTime')->willReturn(self::REQUEST_TIME - 1);
+    $operation = $this->createMock(FieldItemListInterface::class);
+    $operation->method('getString')->willReturn('expired-operation');
+    $url = $this->createMock(FieldItemListInterface::class);
+    $url->method('getString')->willReturn(
+      'https://qecom.novapay.ua/expired-session',
+    );
+    $candidate->method('get')->willReturnMap([
+      ['novapay_operation_id', $operation],
+      ['novapay_payment_url', $url],
+    ]);
+    $this->paymentStorage->method('loadByProperties')->willReturn([$candidate]);
+    $session_request = new CreateSessionRequest('+380501234567');
+    $this->payloadBuilder->method('buildSessionRequest')
+      ->willReturn($session_request);
+    $this->apiClient->expects(self::once())->method('createSession')
+      ->willThrowException(ApiTransportException::requestFailed());
+    $this->orderStorage->expects(self::once())->method('releaseLock')->with(10);
+    $this->checkoutLock->expects(self::once())->method('release')
+      ->with('commerce_novapay_checkout:10');
+
+    $this->expectException(CheckoutPreparationException::class);
+    $this->coordinator->prepareRedirect(
+      $this->payment,
+      'https://merchant.example/return',
+      'https://merchant.example/cancel',
+    );
+  }
+
+  /**
+   * Tests that lock contention stops checkout before the order is loaded.
+   */
+  public function testCheckoutLockContentionFailsClosed(): void {
+    $this->checkoutLock->expects(self::once())->method('acquire')
+      ->with('commerce_novapay_checkout:10', 60.0)
+      ->willReturn(FALSE);
+    $this->checkoutLock->expects(self::once())->method('wait')
+      ->with('commerce_novapay_checkout:10', 60)
+      ->willReturn(TRUE);
+    $this->checkoutLock->expects(self::never())->method('release');
+    $this->orderStorage->expects(self::never())->method('loadForUpdate');
+
+    try {
+      $this->coordinator->prepareRedirect(
+        $this->payment,
+        'https://merchant.example/return',
+        'https://merchant.example/cancel',
+      );
+      self::fail('A checkout preparation exception was not thrown.');
+    }
+    catch (CheckoutPreparationException $exception) {
+      self::assertSame('checkout_lock', $exception->getStage());
+    }
+  }
+
+  /**
+   * Allows initial acquisition and renewal of the checkout lock.
+   */
+  private function allowCheckoutLock(): void {
+    $this->checkoutLock->method('acquire')->willReturn(TRUE);
   }
 
   /**
