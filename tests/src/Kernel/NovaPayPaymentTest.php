@@ -11,6 +11,9 @@ use Drupal\commerce_novapay\Phone\CustomerProfilePhoneInspector;
 use Drupal\commerce_novapay\Phone\CustomerProfilePhoneInspectorInterface;
 use Drupal\commerce_novapay\Plugin\Commerce\PaymentType\NovaPayPayment;
 use Drupal\commerce_novapay\Postback\NovaPayStatus;
+use Drupal\commerce_novapay\Postback\PostbackEventRepository;
+use Drupal\commerce_novapay\Postback\PostbackEventRepositoryInterface;
+use Drupal\commerce_novapay\Postback\PostbackOutcome;
 use Drupal\commerce_novapay\Postback\PaymentStatusMapper;
 use Drupal\commerce_novapay\Postback\PaymentStatusMapperInterface;
 use Drupal\commerce_novapay\Phone\OrderPhoneResolverInterface;
@@ -36,6 +39,7 @@ use Symfony\Component\HttpFoundation\Request;
 #[CoversClass(NovaPayPayment::class)]
 #[CoversClass(CustomerProfilePhoneInspector::class)]
 #[CoversClass(PaymentStatusMapper::class)]
+#[CoversClass(PostbackEventRepository::class)]
 #[Group('commerce_novapay')]
 final class NovaPayPaymentTest extends OrderKernelTestBase {
 
@@ -68,6 +72,10 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
     parent::setUp();
 
     $this->installEntitySchema('commerce_payment');
+    $this->installSchema(
+      'commerce_novapay',
+      ['commerce_novapay_postback_event'],
+    );
     $this->installConfig(['commerce_payment']);
 
     $this->paymentGateway = PaymentGateway::create([
@@ -157,6 +165,55 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
     self::assertArrayHasKey('novapay_payment_url', $field_definitions);
     self::assertArrayHasKey('expires', $field_definitions);
 
+  }
+
+  /**
+   * Tests unique event claims and the non-sensitive journal schema.
+   */
+  public function testPostbackEventUniqueness(): void {
+    $repository = $this->container->get(
+      'commerce_novapay.postback.event_repository',
+    );
+    self::assertInstanceOf(PostbackEventRepositoryInterface::class, $repository);
+    $calls = 0;
+    $processor = static function () use (&$calls): PostbackOutcome {
+      $calls++;
+      return PostbackOutcome::Applied;
+    };
+
+    $first = $repository->processOnce(
+      hash('sha256', 'raw-body-with-pii'),
+      'session-id',
+      'novapay_test',
+      NovaPayStatus::Paid,
+      $processor,
+    );
+    $duplicate = $repository->processOnce(
+      hash('sha256', 'raw-body-with-pii'),
+      'session-id',
+      'novapay_test',
+      NovaPayStatus::Paid,
+      $processor,
+    );
+
+    self::assertSame(PostbackOutcome::Applied, $first);
+    self::assertNull($duplicate);
+    self::assertSame(1, $calls);
+
+    $database = $this->container->get('database');
+    $row = $database->select('commerce_novapay_postback_event', 'event')
+      ->fields('event')
+      ->execute()
+      ->fetchAssoc();
+    self::assertIsArray($row);
+    self::assertSame(hash('sha256', 'raw-body-with-pii'), $row['event_key']);
+    self::assertSame('session-id', $row['session_id']);
+    self::assertSame('novapay_test', $row['gateway_id']);
+    self::assertSame('paid', $row['status']);
+    self::assertSame('1', (string) $row['signature_valid']);
+    self::assertSame('applied', $row['outcome']);
+    self::assertArrayNotHasKey('raw_body', $row);
+    self::assertArrayNotHasKey('payload', $row);
   }
 
   /**

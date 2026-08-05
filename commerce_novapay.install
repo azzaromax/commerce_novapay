@@ -8,6 +8,69 @@
 declare(strict_types=1);
 
 /**
+ * Implements hook_schema().
+ *
+ * @phpstan-return array<string, array<string, mixed>>
+ */
+function commerce_novapay_schema(): array {
+  $schema['commerce_novapay_postback_event'] = [
+    'description' => 'Stores non-sensitive NovaPay postback idempotency data.',
+    'fields' => [
+      'event_key' => [
+        'description' => 'SHA-256 hash of the exact raw request body.',
+        'type' => 'varchar_ascii',
+        'length' => 64,
+        'not null' => TRUE,
+      ],
+      'session_id' => [
+        'description' => 'NovaPay session identifier.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+      ],
+      'gateway_id' => [
+        'description' => 'Commerce payment gateway configuration ID.',
+        'type' => 'varchar_ascii',
+        'length' => 255,
+        'not null' => TRUE,
+      ],
+      'status' => [
+        'description' => 'Normalized NovaPay session status.',
+        'type' => 'varchar_ascii',
+        'length' => 64,
+        'not null' => TRUE,
+      ],
+      'received' => [
+        'description' => 'Unix timestamp when the event was processed.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ],
+      'signature_valid' => [
+        'description' => 'Whether the event signature was verified.',
+        'type' => 'int',
+        'size' => 'tiny',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ],
+      'outcome' => [
+        'description' => 'Bounded postback processing outcome.',
+        'type' => 'varchar_ascii',
+        'length' => 32,
+        'not null' => TRUE,
+      ],
+    ],
+    'primary key' => ['event_key'],
+    'indexes' => [
+      'session_gateway' => ['session_id', 'gateway_id'],
+      'received' => ['received'],
+    ],
+  ];
+
+  return $schema;
+}
+
+/**
  * Installs the NovaPay payment bundle and its fields on existing sites.
  */
 function commerce_novapay_update_11001(): void {
@@ -23,4 +86,16 @@ function commerce_novapay_update_11001(): void {
     $entity_type,
     ['commerce_novapay'],
   );
+}
+
+/**
+ * Adds the postback event idempotency journal to existing installations.
+ */
+function commerce_novapay_update_11003(): void {
+  $database_schema = \Drupal::database()->schema();
+  $table = 'commerce_novapay_postback_event';
+  if (!$database_schema->tableExists($table)) {
+    $schema = commerce_novapay_schema();
+    $database_schema->createTable($table, $schema[$table]);
+  }
 }

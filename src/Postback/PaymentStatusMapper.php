@@ -22,9 +22,45 @@ final class PaymentStatusMapper implements PaymentStatusMapperInterface {
     $transition_id = $this->getTransitionId($state->getId(), $status);
     if ($transition_id !== NULL) {
       $state->applyTransitionById($transition_id);
+      $payment->setRemoteState($status->value);
+      $payment->save();
+      return;
     }
-    $payment->setRemoteState($status->value);
-    $payment->save();
+
+    if (
+      $this->canUpdateRemoteState($state->getId(), $status)
+      && $payment->getRemoteState() !== $status->value
+    ) {
+      $payment->setRemoteState($status->value);
+      $payment->save();
+    }
+  }
+
+  /**
+   * Determines whether an intermediate status is monotonic for this state.
+   */
+  private function canUpdateRemoteState(
+    string $current_state,
+    NovaPayStatus $status,
+  ): bool {
+    return match ($current_state) {
+      'pending' => in_array(
+        $status,
+        [NovaPayStatus::Created, NovaPayStatus::Processing],
+        TRUE,
+      ),
+      'authorization' => in_array(
+        $status,
+        [
+          NovaPayStatus::ProcessingHoldCompletion,
+          NovaPayStatus::ProcessingVoid,
+        ],
+        TRUE,
+      ),
+      'completed', 'partially_refunded' =>
+        $status === NovaPayStatus::ProcessingVoid,
+      default => FALSE,
+    };
   }
 
   /**

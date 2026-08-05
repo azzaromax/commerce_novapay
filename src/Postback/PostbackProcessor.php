@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\commerce_novapay\Postback;
 
 use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\Core\Lock\LockBackendInterface;
 use Drupal\commerce_novapay\Credential\NovaPayMode;
 use Drupal\commerce_novapay\Exception\InvalidPostbackException;
 use Drupal\commerce_novapay\Postback\Dto\NormalizedPostbackEvent;
@@ -29,6 +30,8 @@ final class PostbackProcessor implements PostbackProcessorInterface {
     private readonly PostbackParserInterface $parser,
     private readonly EntityTypeManagerInterface $entity_type_manager,
     private readonly PaymentStatusMapperInterface $status_mapper,
+    private readonly PostbackEventRepositoryInterface $event_repository,
+    private readonly LockBackendInterface $lock,
   ) {}
 
   /**
@@ -66,18 +69,37 @@ final class PostbackProcessor implements PostbackProcessorInterface {
       return PostbackResult::invalidPayload();
     }
     $event = $parsed->getEvent();
-    $payment = $this->findPayment($gateway, $event);
-    if ($payment === NULL) {
-      return PostbackResult::forEvent(
-        PostbackOutcome::UnknownPayment,
-        $parsed->getVersion(),
-        $event->getStatus(),
-      );
+    $lock_name = 'commerce_novapay:postback:' . $event->getSessionId();
+    if (!$this->lock->acquire($lock_name)) {
+      $this->lock->wait($lock_name);
+      if (!$this->lock->acquire($lock_name)) {
+        throw new \RuntimeException('Unable to serialize postback processing.');
+      }
     }
 
-    $this->status_mapper->apply($payment, $event->getStatus());
+    try {
+      $outcome = $this->event_repository->processOnce(
+        hash('sha256', $raw_body),
+        $event->getSessionId(),
+        (string) $gateway->id(),
+        $event->getStatus(),
+        function () use ($gateway, $event): PostbackOutcome {
+          $payment = $this->findPayment($gateway, $event);
+          if ($payment === NULL) {
+            return PostbackOutcome::UnknownPayment;
+          }
+
+          $this->status_mapper->apply($payment, $event->getStatus());
+          return PostbackOutcome::Applied;
+        },
+      );
+    }
+    finally {
+      $this->lock->release($lock_name);
+    }
+
     return PostbackResult::forEvent(
-      PostbackOutcome::Applied,
+      $outcome ?? PostbackOutcome::Duplicate,
       $parsed->getVersion(),
       $event->getStatus(),
     );

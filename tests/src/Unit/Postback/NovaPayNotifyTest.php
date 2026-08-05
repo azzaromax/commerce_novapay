@@ -84,6 +84,14 @@ final class NovaPayNotifyTest extends TestCase {
       ),
       Response::HTTP_OK,
     ];
+    yield 'duplicate' => [
+      PostbackResult::forEvent(
+        PostbackOutcome::Duplicate,
+        PostbackVersion::V1,
+        NovaPayStatus::Paid,
+      ),
+      Response::HTTP_OK,
+    ];
   }
 
   /**

@@ -10,6 +10,7 @@ namespace Drupal\commerce_novapay\Postback;
 enum PostbackOutcome: string {
 
   case Applied = 'applied';
+  case Duplicate = 'duplicate';
   case InvalidPayload = 'invalid_payload';
   case InvalidSignature = 'invalid_signature';
   case UnknownPayment = 'unknown_payment';

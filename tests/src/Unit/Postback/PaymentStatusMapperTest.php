@@ -76,4 +76,19 @@ final class PaymentStatusMapperTest extends TestCase {
     ];
   }
 
+  /**
+   * Tests that an older intermediate event cannot overwrite a final state.
+   */
+  public function testProcessingCannotRollBackCompletedPayment(): void {
+    $payment = $this->createMock(PaymentInterface::class);
+    $state = $this->createMock(StateItemInterface::class);
+    $state->method('getId')->willReturn('completed');
+    $payment->method('getState')->willReturn($state);
+    $state->expects(self::never())->method('applyTransitionById');
+    $payment->expects(self::never())->method('setRemoteState');
+    $payment->expects(self::never())->method('save');
+
+    (new PaymentStatusMapper())->apply($payment, NovaPayStatus::Processing);
+  }
+
 }

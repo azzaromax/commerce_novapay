@@ -84,6 +84,15 @@ services:
   Drupal\commerce_novapay\Postback\PaymentStatusMapperInterface:
     alias: commerce_novapay.postback.status_mapper
 
+  commerce_novapay.postback.event_repository:
+    class: Drupal\commerce_novapay\Postback\PostbackEventRepository
+    arguments:
+      - '@database'
+      - '@datetime.time'
+
+  Drupal\commerce_novapay\Postback\PostbackEventRepositoryInterface:
+    alias: commerce_novapay.postback.event_repository
+
   commerce_novapay.postback.processor:
     class: Drupal\commerce_novapay\Postback\PostbackProcessor
     arguments:
@@ -92,6 +101,8 @@ services:
       - '@commerce_novapay.postback.parser'
       - '@entity_type.manager'
       - '@commerce_novapay.postback.status_mapper'
+      - '@commerce_novapay.postback.event_repository'
+      - '@lock'
 
   Drupal\commerce_novapay\Postback\PostbackProcessorInterface:
     alias: commerce_novapay.postback.processor

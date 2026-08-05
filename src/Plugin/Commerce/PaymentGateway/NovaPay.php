@@ -491,6 +491,7 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
       PostbackOutcome::InvalidSignature => Response::HTTP_FORBIDDEN,
       PostbackOutcome::InvalidPayload => Response::HTTP_BAD_REQUEST,
       PostbackOutcome::Applied,
+      PostbackOutcome::Duplicate,
       PostbackOutcome::UnknownPayment => Response::HTTP_OK,
     });
   }
