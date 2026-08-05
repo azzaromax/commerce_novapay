@@ -8,6 +8,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Lock\LockBackendInterface;
 use Drupal\commerce_novapay\Credential\NovaPayMode;
 use Drupal\commerce_novapay\Exception\InvalidPostbackException;
+use Drupal\commerce_novapay\Exception\PostbackProcessingException;
 use Drupal\commerce_novapay\Postback\Dto\NormalizedPostbackEvent;
 use Drupal\commerce_novapay\Postback\Parser\PostbackParserInterface;
 use Drupal\commerce_novapay\Runtime\RuntimeConfigurationProviderInterface;
@@ -73,7 +74,7 @@ final class PostbackProcessor implements PostbackProcessorInterface {
     if (!$this->lock->acquire($lock_name)) {
       $this->lock->wait($lock_name);
       if (!$this->lock->acquire($lock_name)) {
-        throw new \RuntimeException('Unable to serialize postback processing.');
+        throw PostbackProcessingException::serializationFailed();
       }
     }
 
@@ -115,7 +116,7 @@ final class PostbackProcessor implements PostbackProcessorInterface {
     $payment_storage = $this->entity_type_manager
       ->getStorage('commerce_payment');
     if (!$payment_storage instanceof PaymentStorageInterface) {
-      throw new \RuntimeException('Commerce payment storage is unavailable.');
+      throw PostbackProcessingException::paymentStorageUnavailable();
     }
 
     $payment = $this->getUniquePayment($payment_storage->loadByProperties([
@@ -143,7 +144,7 @@ final class PostbackProcessor implements PostbackProcessorInterface {
   ): ?PaymentInterface {
     $order_storage = $this->entity_type_manager->getStorage('commerce_order');
     if (!$order_storage instanceof OrderStorageInterface) {
-      throw new \RuntimeException('Commerce order storage is unavailable.');
+      throw PostbackProcessingException::orderStorageUnavailable();
     }
 
     $candidates = [];

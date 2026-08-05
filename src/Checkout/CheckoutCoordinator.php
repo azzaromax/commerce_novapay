@@ -12,6 +12,7 @@ use Drupal\Core\Lock\LockBackendInterface;
 use Drupal\commerce_novapay\Api\Dto\Response\PaymentResponse;
 use Drupal\commerce_novapay\Api\NovaPayApiClientInterface;
 use Drupal\commerce_novapay\Credential\NovaPayMode;
+use Drupal\commerce_novapay\Exception\CheckoutContextException;
 use Drupal\commerce_novapay\Exception\CheckoutPreparationException;
 use Drupal\commerce_novapay\Order\OrderPayloadBuilderInterface;
 use Drupal\commerce_novapay\Runtime\RuntimeConfigurationProviderInterface;
@@ -68,20 +69,20 @@ final class CheckoutCoordinator implements CheckoutCoordinatorInterface {
       $order_storage = $this->entity_type_manager
         ->getStorage('commerce_order');
       if (!$order_storage instanceof OrderStorageInterface) {
-        throw new \RuntimeException('Commerce order storage is unavailable.');
+        throw CheckoutContextException::orderStorageUnavailable();
       }
 
       $stage = 'order_lock';
       $order = $order_storage->loadForUpdate($order_id);
       if (!$order instanceof OrderInterface) {
-        throw new \RuntimeException('The Commerce order is unavailable.');
+        throw CheckoutContextException::orderUnavailable();
       }
       $stage = 'checkout_lock_renewal';
       if (!$this->checkout_lock->acquire(
         $checkout_lock_id,
         self::CHECKOUT_LOCK_TIMEOUT_SECONDS,
       )) {
-        throw new \RuntimeException('The NovaPay checkout lock was lost.');
+        throw CheckoutContextException::lockLost();
       }
 
       $stage = 'gateway_validation';
@@ -91,7 +92,7 @@ final class CheckoutCoordinator implements CheckoutCoordinatorInterface {
         !$plugin instanceof OffsitePaymentGatewayInterface
         || !$plugin instanceof RuntimeConfigurationProviderInterface
       ) {
-        throw new \RuntimeException('The NovaPay gateway is unavailable.');
+        throw CheckoutContextException::gatewayUnavailable();
       }
 
       $stage = 'runtime_configuration';
@@ -132,7 +133,7 @@ final class CheckoutCoordinator implements CheckoutCoordinatorInterface {
       $stage = 'payment_save';
       $balance = $order->getBalance();
       if (!$balance instanceof Price) {
-        throw new \RuntimeException('The Commerce order balance is unavailable.');
+        throw CheckoutContextException::balanceUnavailable();
       }
 
       $payment->setAmount($balance);
@@ -188,7 +189,7 @@ final class CheckoutCoordinator implements CheckoutCoordinatorInterface {
       return;
     }
 
-    throw new \RuntimeException('The NovaPay checkout is already being prepared.');
+    throw CheckoutContextException::lockUnavailable();
   }
 
   /**
@@ -204,7 +205,7 @@ final class CheckoutCoordinator implements CheckoutCoordinatorInterface {
         ['options' => ['min_range' => 1, 'max_range' => PHP_INT_MAX]],
       ) === FALSE
     ) {
-      throw new \RuntimeException('The Commerce order identifier is invalid.');
+      throw CheckoutContextException::invalidOrderIdentifier();
     }
 
     return (int) $order_id;
@@ -228,7 +229,7 @@ final class CheckoutCoordinator implements CheckoutCoordinatorInterface {
       || $gateway->id() !== $current_gateway->id()
       || $gateway->getPluginId() !== 'novapay'
     ) {
-      throw new \RuntimeException('The order does not use the NovaPay gateway.');
+      throw CheckoutContextException::gatewayMismatch();
     }
 
     return $gateway;
@@ -245,7 +246,7 @@ final class CheckoutCoordinator implements CheckoutCoordinatorInterface {
     $payment_storage = $this->entity_type_manager
       ->getStorage('commerce_payment');
     if (!$payment_storage instanceof PaymentStorageInterface) {
-      throw new \RuntimeException('Commerce payment storage is unavailable.');
+      throw CheckoutContextException::paymentStorageUnavailable();
     }
 
     $payments = $payment_storage->loadByProperties([

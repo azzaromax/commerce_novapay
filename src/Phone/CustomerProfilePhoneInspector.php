@@ -33,41 +33,14 @@ final class CustomerProfilePhoneInspector implements CustomerProfilePhoneInspect
       ->loadMultiple();
 
     foreach ($profile_types as $profile_type) {
-      if (
-        !$profile_type instanceof ProfileTypeInterface
-        || !$profile_type->getThirdPartySetting(
-          'commerce_order',
-          'customer_profile_type',
-          FALSE,
-        )
-      ) {
+      $profile_type = $this->getCommerceCustomerProfile($profile_type);
+      if ($profile_type === NULL) {
         continue;
       }
 
-      $has_telephone = FALSE;
-      $has_payment_phone = FALSE;
-      $definitions = $this->entity_field_manager->getFieldDefinitions(
-        'profile',
-        (string) $profile_type->id(),
+      [$has_telephone, $has_payment_phone] = $this->inspectPhoneFields(
+        $profile_type,
       );
-      foreach ($definitions as $definition) {
-        if (
-          !$definition instanceof FieldConfigInterface
-          || $definition->getType() !== 'telephone'
-        ) {
-          continue;
-        }
-        $has_telephone = TRUE;
-        if ($definition->getThirdPartySetting(
-          'commerce_novapay',
-          'payment_phone',
-          FALSE,
-        )) {
-          $has_payment_phone = TRUE;
-          break;
-        }
-      }
-
       $label = (string) $profile_type->label();
       if (!$has_telephone) {
         $missing_telephone[] = $label;
@@ -82,6 +55,78 @@ final class CustomerProfilePhoneInspector implements CustomerProfilePhoneInspect
     return new CustomerProfilePhoneReadiness(
       $missing_telephone,
       $unmarked_telephone,
+    );
+  }
+
+  /**
+   * Determines whether an entity is designated as a Commerce customer profile.
+   */
+  private function getCommerceCustomerProfile(mixed $profile_type): ?ProfileTypeInterface {
+    if (
+      !$profile_type instanceof ProfileTypeInterface
+      || !(bool) $profile_type->getThirdPartySetting(
+        'commerce_order',
+        'customer_profile_type',
+        FALSE,
+      )
+    ) {
+      return NULL;
+    }
+
+    return $profile_type;
+  }
+
+  /**
+   * Inspects telephone field definitions for one customer profile type.
+   *
+   * @return array{bool, bool}
+   *   Whether a telephone field exists and whether one is designated for
+   *   NovaPay payments.
+   */
+  private function inspectPhoneFields(ProfileTypeInterface $profile_type): array {
+    $has_telephone = FALSE;
+    $has_payment_phone = FALSE;
+    $definitions = $this->entity_field_manager->getFieldDefinitions(
+      'profile',
+      (string) $profile_type->id(),
+    );
+    foreach ($definitions as $definition) {
+      $definition = $this->getTelephoneField($definition);
+      if ($definition === NULL) {
+        continue;
+      }
+      $has_telephone = TRUE;
+      if ($this->isPaymentPhoneField($definition)) {
+        $has_payment_phone = TRUE;
+        break;
+      }
+    }
+
+    return [$has_telephone, $has_payment_phone];
+  }
+
+  /**
+   * Checks whether a field definition is a configurable telephone field.
+   */
+  private function getTelephoneField(mixed $definition): ?FieldConfigInterface {
+    if (
+      !$definition instanceof FieldConfigInterface
+      || $definition->getType() !== 'telephone'
+    ) {
+      return NULL;
+    }
+
+    return $definition;
+  }
+
+  /**
+   * Checks whether a telephone field is designated for NovaPay payments.
+   */
+  private function isPaymentPhoneField(FieldConfigInterface $definition): bool {
+    return (bool) $definition->getThirdPartySetting(
+      'commerce_novapay',
+      'payment_phone',
+      FALSE,
     );
   }
 

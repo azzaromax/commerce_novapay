@@ -19,6 +19,7 @@ use Drupal\commerce_novapay\Checkout\CheckoutCoordinator;
 use Drupal\commerce_novapay\Credential\Credentials;
 use Drupal\commerce_novapay\Credential\NovaPayMode;
 use Drupal\commerce_novapay\Exception\ApiTransportException;
+use Drupal\commerce_novapay\Exception\CheckoutContextException;
 use Drupal\commerce_novapay\Exception\CheckoutPreparationException;
 use Drupal\commerce_novapay\Order\OrderPayloadBuilderInterface;
 use Drupal\commerce_novapay\Runtime\RuntimeConfiguration;
@@ -41,6 +42,7 @@ use PHPUnit\Framework\TestCase;
  * Tests locked NovaPay checkout creation and active-session reuse.
  */
 #[CoversClass(CheckoutCoordinator::class)]
+#[CoversClass(CheckoutContextException::class)]
 #[Group('commerce_novapay')]
 final class CheckoutCoordinatorTest extends TestCase {
 
@@ -414,6 +416,10 @@ final class CheckoutCoordinatorTest extends TestCase {
     }
     catch (CheckoutPreparationException $exception) {
       self::assertSame('checkout_lock', $exception->getStage());
+      self::assertSame(
+        CheckoutContextException::class,
+        $exception->getSourceClass(),
+      );
     }
   }
 
