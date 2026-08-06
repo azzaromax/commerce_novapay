@@ -31,18 +31,35 @@ final class PostbackEventRepository implements PostbackEventRepositoryInterface 
   ): ?PostbackOutcome {
     $transaction = $this->database->startTransaction();
     try {
-      $exists = (bool) $this->database->select(self::TABLE, 'event')
-        ->fields('event', ['event_key'])
+      $existing_outcome = $this->database->select(self::TABLE, 'event')
+        ->fields('event', ['outcome'])
         ->condition('event_key', $event_key)
         ->range(0, 1)
         ->execute()
         ->fetchField();
-      if ($exists) {
+      if (
+        $existing_outcome !== FALSE
+        && $existing_outcome !== PostbackOutcome::UnknownPayment->value
+      ) {
         $transaction->commitOrRelease();
         return NULL;
       }
+      if ($existing_outcome === PostbackOutcome::UnknownPayment->value) {
+        // Older module versions journaled unknown sessions. Remove that claim
+        // so a later replay can be applied after the Commerce payment exists.
+        $this->database->delete(self::TABLE)
+          ->condition('event_key', $event_key)
+          ->condition('outcome', PostbackOutcome::UnknownPayment->value)
+          ->execute();
+      }
 
       $outcome = $processor();
+      if ($outcome === PostbackOutcome::UnknownPayment) {
+        // A valid callback can race the local payment save. Acknowledge it,
+        // but leave it unclaimed so an identical replay remains actionable.
+        $transaction->commitOrRelease();
+        return $outcome;
+      }
       $this->database->insert(self::TABLE)
         ->fields([
           'event_key' => $event_key,

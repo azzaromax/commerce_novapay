@@ -217,6 +217,64 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
   }
 
   /**
+   * Tests that an unknown payment remains eligible for a later replay.
+   */
+  public function testUnknownPostbackIsNotClaimed(): void {
+    $repository = $this->container->get(
+      'commerce_novapay.postback.event_repository',
+    );
+    self::assertInstanceOf(
+      PostbackEventRepositoryInterface::class,
+      $repository,
+    );
+    $event_key = hash('sha256', 'postback-before-payment-save');
+    $database = $this->container->get('database');
+
+    $unknown = $repository->processOnce(
+      $event_key,
+      'late-session-id',
+      'novapay_test',
+      NovaPayStatus::Paid,
+      static fn (): PostbackOutcome => PostbackOutcome::UnknownPayment,
+    );
+    self::assertSame(PostbackOutcome::UnknownPayment, $unknown);
+    self::assertFalse($database
+      ->select('commerce_novapay_postback_event', 'event')
+      ->fields('event', ['event_key'])
+      ->condition('event_key', $event_key)
+      ->execute()
+      ->fetchField());
+
+    // Simulate an unknown claim left by an older module version.
+    $database->insert('commerce_novapay_postback_event')
+      ->fields([
+        'event_key' => $event_key,
+        'session_id' => 'late-session-id',
+        'gateway_id' => 'novapay_test',
+        'status' => NovaPayStatus::Paid->value,
+        'received' => 1,
+        'signature_valid' => 1,
+        'outcome' => PostbackOutcome::UnknownPayment->value,
+      ])
+      ->execute();
+
+    $applied = $repository->processOnce(
+      $event_key,
+      'late-session-id',
+      'novapay_test',
+      NovaPayStatus::Paid,
+      static fn (): PostbackOutcome => PostbackOutcome::Applied,
+    );
+    self::assertSame(PostbackOutcome::Applied, $applied);
+    self::assertSame('applied', $database
+      ->select('commerce_novapay_postback_event', 'event')
+      ->fields('event', ['outcome'])
+      ->condition('event_key', $event_key)
+      ->execute()
+      ->fetchField());
+  }
+
+  /**
    * Tests field persistence and total_paid refund semantics.
    */
   public function testPaymentOrderIntegration(): void {

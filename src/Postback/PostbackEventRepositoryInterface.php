@@ -10,7 +10,10 @@ namespace Drupal\commerce_novapay\Postback;
 interface PostbackEventRepositoryInterface {
 
   /**
-   * Runs a processor and records its outcome unless the event already exists.
+   * Runs a processor and records its stable outcome unless it already exists.
+   *
+   * Unknown payments are acknowledged but not claimed, allowing an identical
+   * callback to be applied if it raced creation of the local payment entity.
    *
    * @param string $event_key
    *   SHA-256 hash of the exact raw request body.
