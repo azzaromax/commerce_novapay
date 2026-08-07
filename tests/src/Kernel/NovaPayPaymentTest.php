@@ -6,10 +6,25 @@ namespace Drupal\Tests\commerce_novapay\Kernel;
 
 use Drupal\Core\Entity\EntityFormInterface;
 use Drupal\Core\Form\FormState;
+use Drupal\Core\Lock\LockBackendInterface;
 use Drupal\Tests\commerce_order\Kernel\OrderKernelTestBase;
+use Drupal\commerce_novapay\Api\Dto\Request\CompleteHoldRequest;
+use Drupal\commerce_novapay\Api\Dto\Request\VoidRequest;
+use Drupal\commerce_novapay\Api\Dto\Response\AcknowledgementResponse;
+use Drupal\commerce_novapay\Api\NovaPayApiClientInterface;
+use Drupal\commerce_novapay\Credential\Credentials;
+use Drupal\commerce_novapay\Credential\NovaPayMode;
+use Drupal\commerce_novapay\Exception\ApiFatalException;
+use Drupal\commerce_novapay\Exception\ApiProcessingException;
+use Drupal\commerce_novapay\Exception\ApiTransportException;
+use Drupal\commerce_novapay\Exception\ApiUnexpectedResponseException;
+use Drupal\commerce_novapay\Exception\ApiValidationException;
+use Drupal\commerce_novapay\Payment\AuthorizationOperationManager;
+use Drupal\commerce_novapay\Payment\SessionLockName;
 use Drupal\commerce_novapay\Phone\CustomerProfilePhoneInspector;
 use Drupal\commerce_novapay\Phone\CustomerProfilePhoneInspectorInterface;
 use Drupal\commerce_novapay\Plugin\Commerce\PaymentType\NovaPayPayment;
+use Drupal\commerce_novapay\PluginForm\NovaPayCaptureForm;
 use Drupal\commerce_novapay\Postback\NovaPayStatus;
 use Drupal\commerce_novapay\Postback\PostbackEventRepository;
 use Drupal\commerce_novapay\Postback\PostbackEventRepositoryInterface;
@@ -18,11 +33,19 @@ use Drupal\commerce_novapay\Postback\PaymentStatusMapper;
 use Drupal\commerce_novapay\Postback\PaymentStatusMapperInterface;
 use Drupal\commerce_novapay\Phone\OrderPhoneResolverInterface;
 use Drupal\commerce_novapay\PluginForm\NovaPayPaymentOffsiteForm;
+use Drupal\commerce_novapay\PluginForm\NovaPayVoidForm;
+use Drupal\commerce_novapay\Runtime\RuntimeConfiguration;
+use Drupal\commerce_novapay\Runtime\RuntimeConfigurationProviderInterface;
+use Drupal\commerce_novapay\Runtime\RuntimeProfile;
+use Drupal\commerce_novapay\Runtime\TransactionMode;
 use Drupal\commerce_order\Entity\Order;
 use Drupal\commerce_order\Entity\OrderItem;
 use Drupal\commerce_payment\Entity\PaymentGateway;
 use Drupal\commerce_payment\Entity\PaymentInterface;
 use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\OffsitePaymentGatewayInterface;
+use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\SupportsAuthorizationsInterface;
+use Drupal\commerce_payment\Exception\InvalidRequestException;
+use Drupal\commerce_payment\Exception\PaymentGatewayException;
 use Drupal\commerce_price\Price;
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
@@ -119,6 +142,18 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
       NovaPayPaymentOffsiteForm::class,
       $this->paymentGateway->getPlugin()->getFormClass('offsite-payment'),
     );
+    self::assertInstanceOf(
+      SupportsAuthorizationsInterface::class,
+      $this->paymentGateway->getPlugin(),
+    );
+    self::assertSame(
+      NovaPayCaptureForm::class,
+      $this->paymentGateway->getPlugin()->getFormClass('capture-payment'),
+    );
+    self::assertSame(
+      NovaPayVoidForm::class,
+      $this->paymentGateway->getPlugin()->getFormClass('void-payment'),
+    );
 
     /** @var \Drupal\state_machine\WorkflowManagerInterface $workflow_manager */
     $workflow_manager = $this->container->get('plugin.manager.workflow');
@@ -163,6 +198,8 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
       ->getFieldDefinitions('commerce_payment', 'novapay_payment');
     self::assertArrayHasKey('novapay_operation_id', $field_definitions);
     self::assertArrayHasKey('novapay_payment_url', $field_definitions);
+    self::assertArrayHasKey('novapay_pending_operation', $field_definitions);
+    self::assertArrayHasKey('novapay_pending_amount', $field_definitions);
     self::assertArrayHasKey('expires', $field_definitions);
 
   }
@@ -396,6 +433,264 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
   }
 
   /**
+   * Tests partial capture locking and postback-only amount/state changes.
+   */
+  public function testPartialCaptureAwaitsPostback(): void {
+    $payment = $this->createAuthorizationPayment('capture-session');
+    $api_client = $this->createMock(NovaPayApiClientInterface::class);
+    $api_client->expects(self::once())
+      ->method('completeHold')
+      ->with(
+        self::isInstanceOf(RuntimeConfigurationProviderInterface::class),
+        self::callback(static function (CompleteHoldRequest $request): bool {
+          return $request->toArray() === [
+            'session_id' => 'capture-session',
+            'amount' => '10',
+            'operations' => [[
+              'id' => 'operation-id',
+              'amount' => '10',
+              'recipient_identifier' => '31316718',
+            ]],
+          ];
+        }),
+      )
+      ->willReturn(new AcknowledgementResponse(200));
+    $manager = $this->createAuthorizationOperationManager($api_client);
+
+    self::assertTrue($manager->canCapture($payment));
+    self::assertTrue($manager->canVoid($payment));
+    $manager->capture($payment, $this->createRuntimeProvider(), new Price('10', 'USD'));
+
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    self::assertSame('authorization', $payment->getState()->getId());
+    self::assertEquals(new Price('30', 'USD'), $payment->getAmount());
+    self::assertSame(
+      'capture',
+      $payment->get('novapay_pending_operation')->getString(),
+    );
+    self::assertSame(
+      '10',
+      $payment->get('novapay_pending_amount')->getString(),
+    );
+    self::assertFalse($manager->canCapture($payment));
+    self::assertFalse($manager->canVoid($payment));
+
+    $this->expectException(InvalidRequestException::class);
+    try {
+      $manager->capture($payment, $this->createRuntimeProvider());
+    }
+    finally {
+      $mapper = $this->container->get(
+        'commerce_novapay.postback.status_mapper',
+      );
+      self::assertInstanceOf(PaymentStatusMapperInterface::class, $mapper);
+      $mapper->apply($payment, NovaPayStatus::HoldConfirmed);
+      $payment = $this->reloadEntity($payment);
+      self::assertInstanceOf(PaymentInterface::class, $payment);
+      self::assertSame('completed', $payment->getState()->getId());
+      self::assertEquals(new Price('10', 'USD'), $payment->getAmount());
+      self::assertTrue(
+        $payment->get('novapay_pending_operation')->isEmpty(),
+      );
+      self::assertTrue($payment->get('novapay_pending_amount')->isEmpty());
+    }
+  }
+
+  /**
+   * Tests that void is always full and remains pending until postback.
+   */
+  public function testAuthorizationVoidAwaitsPostback(): void {
+    $payment = $this->createAuthorizationPayment('void-session');
+    $api_client = $this->createMock(NovaPayApiClientInterface::class);
+    $api_client->expects(self::once())
+      ->method('voidPayment')
+      ->with(
+        self::isInstanceOf(RuntimeConfigurationProviderInterface::class),
+        self::callback(static fn (VoidRequest $request): bool =>
+          $request->toArray() === ['session_id' => 'void-session']),
+      )
+      ->willReturn(new AcknowledgementResponse(200));
+    $manager = $this->createAuthorizationOperationManager($api_client);
+
+    $manager->void($payment, $this->createRuntimeProvider());
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    self::assertSame('authorization', $payment->getState()->getId());
+    self::assertSame(
+      'void',
+      $payment->get('novapay_pending_operation')->getString(),
+    );
+    self::assertTrue($payment->get('novapay_pending_amount')->isEmpty());
+
+    $mapper = $this->container->get(
+      'commerce_novapay.postback.status_mapper',
+    );
+    self::assertInstanceOf(PaymentStatusMapperInterface::class, $mapper);
+    $mapper->apply($payment, NovaPayStatus::Voided);
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    self::assertSame(
+      'authorization_voided',
+      $payment->getState()->getId(),
+    );
+    self::assertTrue($payment->get('novapay_pending_operation')->isEmpty());
+  }
+
+  /**
+   * Tests that a full capture omits partial-capture API properties.
+   */
+  public function testFullCapturePayload(): void {
+    $payment = $this->createAuthorizationPayment('full-capture-session');
+    $api_client = $this->createMock(NovaPayApiClientInterface::class);
+    $api_client->expects(self::once())
+      ->method('completeHold')
+      ->with(
+        self::isInstanceOf(RuntimeConfigurationProviderInterface::class),
+        self::callback(static fn (CompleteHoldRequest $request): bool =>
+          $request->toArray() === [
+            'session_id' => 'full-capture-session',
+          ]),
+      )
+      ->willReturn(new AcknowledgementResponse(200));
+
+    $lock = $this->createMock(LockBackendInterface::class);
+    $lock_name = SessionLockName::fromSessionId('full-capture-session');
+    $lock->expects(self::once())->method('acquire')
+      ->with($lock_name, 30.0)
+      ->willReturn(TRUE);
+    $lock->expects(self::once())->method('release')->with($lock_name);
+    $manager = $this->createAuthorizationOperationManager($api_client, $lock);
+    $manager->capture($payment, $this->createRuntimeProvider());
+
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    self::assertSame('authorization', $payment->getState()->getId());
+    self::assertSame(
+      '30',
+      $payment->get('novapay_pending_amount')->getString(),
+    );
+  }
+
+  /**
+   * Tests that an uncertain transport result remains blocked for postback.
+   */
+  public function testTransportFailureRetainsPendingMarker(): void {
+    $payment = $this->createAuthorizationPayment('uncertain-void-session');
+    $api_client = $this->createMock(NovaPayApiClientInterface::class);
+    $api_client->expects(self::once())
+      ->method('voidPayment')
+      ->willThrowException(ApiTransportException::requestFailed());
+    $manager = $this->createAuthorizationOperationManager($api_client);
+
+    try {
+      $manager->void($payment, $this->createRuntimeProvider());
+      self::fail('An uncertain transport result must fail the form request.');
+    }
+    catch (PaymentGatewayException $exception) {
+      self::assertStringContainsString('uncertain', $exception->getMessage());
+    }
+
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    self::assertSame('authorization', $payment->getState()->getId());
+    self::assertSame(
+      'void',
+      $payment->get('novapay_pending_operation')->getString(),
+    );
+    self::assertFalse($manager->canVoid($payment));
+  }
+
+  /**
+   * Tests that fatal responses retain the in-flight financial marker.
+   */
+  public function testFatalFailureRetainsPendingMarker(): void {
+    $this->assertUncertainVoidFailureRetainsMarker(
+      new ApiFatalException(500),
+      'fatal-void-session',
+    );
+  }
+
+  /**
+   * Tests that processing outcomes retain the in-flight financial marker.
+   */
+  public function testProcessingFailureRetainsPendingMarker(): void {
+    $this->assertUncertainVoidFailureRetainsMarker(
+      new ApiProcessingException(400, 'TimeoutError'),
+      'processing-void-session',
+    );
+  }
+
+  /**
+   * Tests that malformed server failures retain the financial marker.
+   */
+  public function testMalformedServerFailureRetainsPendingMarker(): void {
+    $this->assertUncertainVoidFailureRetainsMarker(
+      ApiUnexpectedResponseException::invalidError(502),
+      'malformed-server-void-session',
+    );
+  }
+
+  /**
+   * Tests that a definitive validation rejection permits a corrected retry.
+   */
+  public function testValidationFailureClearsPendingMarker(): void {
+    $payment = $this->createAuthorizationPayment('validation-void-session');
+    $api_client = $this->createMock(NovaPayApiClientInterface::class);
+    $api_client->expects(self::once())
+      ->method('voidPayment')
+      ->willThrowException(new ApiValidationException(400, []));
+    $manager = $this->createAuthorizationOperationManager($api_client);
+
+    try {
+      $manager->void($payment, $this->createRuntimeProvider());
+      self::fail('A validation rejection must fail the form request.');
+    }
+    catch (PaymentGatewayException $exception) {
+      self::assertStringContainsString('rejected', $exception->getMessage());
+    }
+
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    self::assertTrue($payment->get('novapay_pending_operation')->isEmpty());
+    self::assertTrue($manager->canVoid($payment));
+  }
+
+  /**
+   * Tests that an expired authorization is unavailable and never submitted.
+   */
+  public function testExpiredAuthorizationIsUnavailable(): void {
+    $payment = $this->createAuthorizationPayment('expired-hold-session');
+    $payment->setExpiresTime(1);
+    $payment->save();
+    $api_client = $this->createMock(NovaPayApiClientInterface::class);
+    $api_client->expects(self::never())->method('completeHold');
+    $manager = $this->createAuthorizationOperationManager($api_client);
+
+    self::assertFalse($manager->canCapture($payment));
+    self::assertFalse($manager->canVoid($payment));
+    $this->expectException(InvalidRequestException::class);
+    $manager->capture($payment, $this->createRuntimeProvider());
+  }
+
+  /**
+   * Tests capture amount bounds before a financial API request is sent.
+   */
+  public function testCaptureAmountBounds(): void {
+    $api_client = $this->createMock(NovaPayApiClientInterface::class);
+    $api_client->expects(self::never())->method('completeHold');
+    $manager = $this->createAuthorizationOperationManager($api_client);
+    $payment = $this->createAuthorizationPayment('invalid-amount-session');
+
+    $this->expectException(InvalidRequestException::class);
+    $manager->capture(
+      $payment,
+      $this->createRuntimeProvider(),
+      new Price('30.01', 'USD'),
+    );
+  }
+
+  /**
    * Tests an explicitly designated customer telephone field as a source.
    */
   public function testDesignatedCustomerPhoneField(): void {
@@ -540,6 +835,95 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
     $order = $this->reloadEntity($this->order);
     assert($order instanceof Order);
     $this->order = $order;
+  }
+
+  /**
+   * Creates a persisted NovaPay authorization for operation tests.
+   */
+  private function createAuthorizationPayment(
+    string $session_id,
+  ): PaymentInterface {
+    $payment_storage = $this->container
+      ->get('entity_type.manager')
+      ->getStorage('commerce_payment');
+    $payment = $payment_storage->create([
+      'payment_gateway' => $this->paymentGateway,
+      'order_id' => $this->order->id(),
+      'amount' => new Price('30', 'USD'),
+      'state' => 'authorization',
+      'remote_id' => $session_id,
+      'remote_state' => 'holded',
+      'novapay_operation_id' => 'operation-id',
+    ]);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    $payment->save();
+    return $payment;
+  }
+
+  /**
+   * Creates the tested manager with a mocked financial boundary.
+   */
+  private function createAuthorizationOperationManager(
+    NovaPayApiClientInterface $api_client,
+    ?LockBackendInterface $lock = NULL,
+  ): AuthorizationOperationManager {
+    return new AuthorizationOperationManager(
+      $this->container->get('entity_type.manager'),
+      $api_client,
+      $lock ?? $this->container->get('lock'),
+    );
+  }
+
+  /**
+   * Asserts that an ambiguous void result remains blocked for postback.
+   */
+  private function assertUncertainVoidFailureRetainsMarker(
+    \Throwable $failure,
+    string $session_id,
+  ): void {
+    $payment = $this->createAuthorizationPayment($session_id);
+    $api_client = $this->createMock(NovaPayApiClientInterface::class);
+    $api_client->expects(self::once())
+      ->method('voidPayment')
+      ->willThrowException($failure);
+    $manager = $this->createAuthorizationOperationManager($api_client);
+
+    try {
+      $manager->void($payment, $this->createRuntimeProvider());
+      self::fail('An uncertain remote result must fail the form request.');
+    }
+    catch (PaymentGatewayException $exception) {
+      self::assertStringContainsString('uncertain', $exception->getMessage());
+    }
+
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    self::assertSame(
+      'void',
+      $payment->get('novapay_pending_operation')->getString(),
+    );
+    self::assertFalse($manager->canVoid($payment));
+  }
+
+  /**
+   * Creates a non-sensitive runtime provider for operation payloads.
+   */
+  private function createRuntimeProvider(): RuntimeConfigurationProviderInterface {
+    $configuration = new RuntimeConfiguration(
+      new RuntimeProfile(
+        NovaPayMode::Test,
+        NULL,
+        TransactionMode::Hold,
+        '31316718',
+        FALSE,
+      ),
+      new Credentials(NovaPayMode::Test, '2', 'private', 'public'),
+    );
+    $provider = $this->createMock(
+      RuntimeConfigurationProviderInterface::class,
+    );
+    $provider->method('getRuntimeConfiguration')->willReturn($configuration);
+    return $provider;
   }
 
 }

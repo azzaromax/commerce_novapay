@@ -243,7 +243,7 @@ final class CheckoutCoordinatorTest extends TestCase {
     $this->payment->expects(self::once())->method('setRemoteState')
       ->with('created')->willReturnSelf();
     $this->payment->expects(self::once())->method('setExpiresTime')
-      ->with(self::REQUEST_TIME + 2592000)->willReturnSelf();
+      ->with(self::REQUEST_TIME + 2505600)->willReturnSelf();
     $this->payment->expects(self::exactly(2))->method('set')
       ->willReturnCallback(function (string $field, string $value): PaymentInterface {
         self::assertContains(

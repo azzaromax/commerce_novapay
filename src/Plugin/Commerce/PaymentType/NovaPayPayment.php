@@ -38,6 +38,20 @@ final class NovaPayPayment extends PaymentTypeBase {
         'The off-site URL returned for this NovaPay payment.',
       ));
 
+    $fields['novapay_pending_operation'] = BundleFieldDefinition::create('string')
+      ->setLabel(new TranslatableMarkup('Pending NovaPay operation'))
+      ->setDescription(new TranslatableMarkup(
+        'A bounded command name retained until NovaPay postback confirmation.',
+      ))
+      ->setSetting('max_length', 16);
+
+    $fields['novapay_pending_amount'] = BundleFieldDefinition::create('string')
+      ->setLabel(new TranslatableMarkup('Pending NovaPay amount'))
+      ->setDescription(new TranslatableMarkup(
+        'The decimal capture amount awaiting NovaPay postback confirmation.',
+      ))
+      ->setSetting('max_length', 64);
+
     return $fields;
   }
 

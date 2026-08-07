@@ -9,6 +9,7 @@ use Drupal\Core\Lock\LockBackendInterface;
 use Drupal\commerce_novapay\Credential\Credentials;
 use Drupal\commerce_novapay\Credential\NovaPayMode;
 use Drupal\commerce_novapay\Exception\InvalidPostbackException;
+use Drupal\commerce_novapay\Payment\SessionLockName;
 use Drupal\commerce_novapay\Postback\Dto\NormalizedPostbackEvent;
 use Drupal\commerce_novapay\Postback\Dto\ParsedPostback;
 use Drupal\commerce_novapay\Postback\NovaPayStatus;
@@ -338,7 +339,7 @@ final class PostbackProcessorTest extends TestCase {
   public function testConcurrentEventWaitsForSessionLock(): void {
     $this->verifier->method('verify')->willReturn(TRUE);
     $this->parser->method('parse')->willReturn($this->createParsedPostback());
-    $lock_name = 'commerce_novapay:postback:session-uuid';
+    $lock_name = SessionLockName::fromSessionId('session-uuid');
     $this->lock = $this->createMock(LockBackendInterface::class);
     $this->lock->expects(self::exactly(2))->method('acquire')
       ->with($lock_name)

@@ -9,6 +9,7 @@ use Drupal\Core\Lock\LockBackendInterface;
 use Drupal\commerce_novapay\Credential\NovaPayMode;
 use Drupal\commerce_novapay\Exception\InvalidPostbackException;
 use Drupal\commerce_novapay\Exception\PostbackProcessingException;
+use Drupal\commerce_novapay\Payment\SessionLockName;
 use Drupal\commerce_novapay\Postback\Dto\NormalizedPostbackEvent;
 use Drupal\commerce_novapay\Postback\Parser\PostbackParserInterface;
 use Drupal\commerce_novapay\Runtime\RuntimeConfigurationProviderInterface;
@@ -70,7 +71,7 @@ final class PostbackProcessor implements PostbackProcessorInterface {
       return PostbackResult::invalidPayload();
     }
     $event = $parsed->getEvent();
-    $lock_name = 'commerce_novapay:postback:' . $event->getSessionId();
+    $lock_name = SessionLockName::fromSessionId($event->getSessionId());
     if (!$this->lock->acquire($lock_name)) {
       $this->lock->wait($lock_name);
       if (!$this->lock->acquire($lock_name)) {

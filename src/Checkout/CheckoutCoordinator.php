@@ -33,7 +33,7 @@ final class CheckoutCoordinator implements CheckoutCoordinatorInterface {
 
   private const CHECKOUT_LOCK_WAIT_SECONDS = 60;
 
-  private const SESSION_LIFETIME_SECONDS = 2592000;
+  private const SESSION_LIFETIME_SECONDS = 2505600;
 
   /**
    * Constructs the NovaPay checkout coordinator.

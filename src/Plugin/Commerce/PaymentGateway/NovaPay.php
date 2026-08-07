@@ -12,8 +12,11 @@ use Drupal\commerce_novapay\Credential\CredentialResolverInterface;
 use Drupal\commerce_novapay\Credential\NovaPayMode;
 use Drupal\commerce_novapay\Credential\RsaKeyValidatorInterface;
 use Drupal\commerce_novapay\Exception\InvalidRuntimeProfileException;
+use Drupal\commerce_novapay\Payment\AuthorizationOperationManagerInterface;
 use Drupal\commerce_novapay\Phone\CustomerProfilePhoneInspectorInterface;
+use Drupal\commerce_novapay\PluginForm\NovaPayCaptureForm;
 use Drupal\commerce_novapay\PluginForm\NovaPayPaymentOffsiteForm;
+use Drupal\commerce_novapay\PluginForm\NovaPayVoidForm;
 use Drupal\commerce_novapay\Postback\PostbackOutcome;
 use Drupal\commerce_novapay\Postback\PostbackProcessorInterface;
 use Drupal\commerce_novapay\Runtime\RuntimeConfiguration;
@@ -23,7 +26,10 @@ use Drupal\commerce_novapay\Runtime\RuntimeProfileStorageInterface;
 use Drupal\commerce_novapay\Runtime\TransactionMode;
 use Drupal\commerce_payment\Attribute\CommercePaymentGateway;
 use Drupal\commerce_payment\Entity\PaymentGatewayInterface;
+use Drupal\commerce_payment\Entity\PaymentInterface;
 use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\OffsitePaymentGatewayBase;
+use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\SupportsAuthorizationsInterface;
+use Drupal\commerce_price\Price;
 use Drupal\commerce_order\Entity\OrderInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -44,12 +50,14 @@ use Symfony\Component\HttpFoundation\Response;
   ],
   forms: [
     'offsite-payment' => NovaPayPaymentOffsiteForm::class,
+    'capture-payment' => NovaPayCaptureForm::class,
+    'void-payment' => NovaPayVoidForm::class,
   ],
   payment_method_types: ['credit_card'],
   payment_type: 'novapay_payment',
   requires_billing_information: FALSE,
 )]
-final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigurationProviderInterface {
+final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigurationProviderInterface, SupportsAuthorizationsInterface {
 
   private const MAX_KEY_BYTES = 65536;
 
@@ -87,6 +95,11 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
    * The sanitized NovaPay logger channel.
    */
   private LoggerInterface $logger;
+
+  /**
+   * The serialized NovaPay capture/void operation manager.
+   */
+  private AuthorizationOperationManagerInterface $authorizationOperationManager;
 
   /**
    * {@inheritdoc}
@@ -130,6 +143,9 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
     );
     $instance->logger = $container->get(
       'logger.channel.commerce_novapay',
+    );
+    $instance->authorizationOperationManager = $container->get(
+      'commerce_novapay.authorization_operation_manager',
     );
 
     return $instance;
@@ -441,6 +457,37 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
     return $this->credentialResolver->resolveRuntimeConfiguration(
       $this->getGatewayUuid(),
     );
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function canCapturePayment(PaymentInterface $payment): bool {
+    return $this->authorizationOperationManager->canCapture($payment);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function capturePayment(
+    PaymentInterface $payment,
+    ?Price $amount = NULL,
+  ): void {
+    $this->authorizationOperationManager->capture($payment, $this, $amount);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function canVoidPayment(PaymentInterface $payment): bool {
+    return $this->authorizationOperationManager->canVoid($payment);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function voidPayment(PaymentInterface $payment): void {
+    $this->authorizationOperationManager->void($payment, $this);
   }
 
   /**

@@ -43,6 +43,16 @@ services:
   Drupal\commerce_novapay\Api\NovaPayApiClientInterface:
     alias: commerce_novapay.api_client
 
+  commerce_novapay.authorization_operation_manager:
+    class: Drupal\commerce_novapay\Payment\AuthorizationOperationManager
+    arguments:
+      - '@entity_type.manager'
+      - '@commerce_novapay.api_client'
+      - '@lock'
+
+  Drupal\commerce_novapay\Payment\AuthorizationOperationManagerInterface:
+    alias: commerce_novapay.authorization_operation_manager
+
   commerce_novapay.order_payload_builder:
     class: Drupal\commerce_novapay\Order\OrderPayloadBuilder
     arguments:
