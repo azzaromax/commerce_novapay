@@ -67,6 +67,70 @@ function commerce_novapay_schema(): array {
     ],
   ];
 
+  $schema['commerce_novapay_refund_ledger'] = [
+    'description' => 'Stores confirmed item-level NovaPay refunds.',
+    'fields' => [
+      'refund_id' => [
+        'description' => 'Primary identifier.',
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ],
+      'payment_id' => [
+        'description' => 'Commerce payment identifier.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ],
+      'order_item_id' => [
+        'description' => 'Commerce order item identifier.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ],
+      'quantity' => [
+        'description' => 'Confirmed refunded item quantity.',
+        'type' => 'numeric',
+        'precision' => 19,
+        'scale' => 6,
+        'not null' => TRUE,
+      ],
+      'amount' => [
+        'description' => 'Confirmed refunded item amount.',
+        'type' => 'numeric',
+        'precision' => 19,
+        'scale' => 6,
+        'not null' => TRUE,
+      ],
+      'currency_code' => [
+        'description' => 'Three-letter currency code.',
+        'type' => 'varchar_ascii',
+        'length' => 3,
+        'not null' => TRUE,
+      ],
+      'event_key' => [
+        'description' => 'SHA-256 hash of the confirming raw postback.',
+        'type' => 'varchar_ascii',
+        'length' => 64,
+        'not null' => TRUE,
+      ],
+      'confirmed' => [
+        'description' => 'Unix timestamp of signed confirmation.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ],
+    ],
+    'primary key' => ['refund_id'],
+    'unique keys' => [
+      'event_item' => ['event_key', 'order_item_id'],
+    ],
+    'indexes' => [
+      'payment_item' => ['payment_id', 'order_item_id'],
+      'confirmed' => ['confirmed'],
+    ],
+  ];
+
   return $schema;
 }
 
@@ -104,6 +168,31 @@ function commerce_novapay_update_11003(): void {
  * Adds authorization operation metadata fields to existing payments.
  */
 function commerce_novapay_update_11004(): void {
+  $payment_type_manager = \Drupal::service(
+    'plugin.manager.commerce_payment_type',
+  );
+  $payment_type_manager->clearCachedDefinitions();
+
+  $entity_type = \Drupal::entityTypeManager()->getDefinition(
+    'commerce_payment',
+  );
+  \Drupal::service('entity.bundle_plugin_installer')->installBundles(
+    $entity_type,
+    ['commerce_novapay'],
+  );
+}
+
+/**
+ * Adds the confirmed refund ledger and pending refund bundle field.
+ */
+function commerce_novapay_update_11005(): void {
+  $database_schema = \Drupal::database()->schema();
+  $table = 'commerce_novapay_refund_ledger';
+  if (!$database_schema->tableExists($table)) {
+    $schema = commerce_novapay_schema();
+    $database_schema->createTable($table, $schema[$table]);
+  }
+
   $payment_type_manager = \Drupal::service(
     'plugin.manager.commerce_payment_type',
   );

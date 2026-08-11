@@ -20,12 +20,14 @@ use Drupal\commerce_novapay\Exception\ApiTransportException;
 use Drupal\commerce_novapay\Exception\ApiUnexpectedResponseException;
 use Drupal\commerce_novapay\Exception\ApiValidationException;
 use Drupal\commerce_novapay\Payment\AuthorizationOperationManager;
+use Drupal\commerce_novapay\Payment\RefundOperationManager;
 use Drupal\commerce_novapay\Payment\SessionLockName;
 use Drupal\commerce_novapay\Phone\CustomerProfilePhoneInspector;
 use Drupal\commerce_novapay\Phone\CustomerProfilePhoneInspectorInterface;
 use Drupal\commerce_novapay\Plugin\Commerce\PaymentType\NovaPayPayment;
 use Drupal\commerce_novapay\PluginForm\NovaPayCaptureForm;
 use Drupal\commerce_novapay\Postback\NovaPayStatus;
+use Drupal\commerce_novapay\Postback\Dto\NormalizedPostbackEvent;
 use Drupal\commerce_novapay\Postback\PostbackEventRepository;
 use Drupal\commerce_novapay\Postback\PostbackEventRepositoryInterface;
 use Drupal\commerce_novapay\Postback\PostbackOutcome;
@@ -33,6 +35,7 @@ use Drupal\commerce_novapay\Postback\PaymentStatusMapper;
 use Drupal\commerce_novapay\Postback\PaymentStatusMapperInterface;
 use Drupal\commerce_novapay\Phone\OrderPhoneResolverInterface;
 use Drupal\commerce_novapay\PluginForm\NovaPayPaymentOffsiteForm;
+use Drupal\commerce_novapay\PluginForm\NovaPayRefundForm;
 use Drupal\commerce_novapay\PluginForm\NovaPayVoidForm;
 use Drupal\commerce_novapay\Runtime\RuntimeConfiguration;
 use Drupal\commerce_novapay\Runtime\RuntimeConfigurationProviderInterface;
@@ -44,6 +47,7 @@ use Drupal\commerce_payment\Entity\PaymentGateway;
 use Drupal\commerce_payment\Entity\PaymentInterface;
 use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\OffsitePaymentGatewayInterface;
 use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\SupportsAuthorizationsInterface;
+use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\SupportsRefundsInterface;
 use Drupal\commerce_payment\Exception\InvalidRequestException;
 use Drupal\commerce_payment\Exception\PaymentGatewayException;
 use Drupal\commerce_price\Price;
@@ -97,7 +101,10 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
     $this->installEntitySchema('commerce_payment');
     $this->installSchema(
       'commerce_novapay',
-      ['commerce_novapay_postback_event'],
+      [
+        'commerce_novapay_postback_event',
+        'commerce_novapay_refund_ledger',
+      ],
     );
     $this->installConfig(['commerce_payment']);
 
@@ -154,6 +161,14 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
       NovaPayVoidForm::class,
       $this->paymentGateway->getPlugin()->getFormClass('void-payment'),
     );
+    self::assertInstanceOf(
+      SupportsRefundsInterface::class,
+      $this->paymentGateway->getPlugin(),
+    );
+    self::assertSame(
+      NovaPayRefundForm::class,
+      $this->paymentGateway->getPlugin()->getFormClass('refund-payment'),
+    );
 
     /** @var \Drupal\state_machine\WorkflowManagerInterface $workflow_manager */
     $workflow_manager = $this->container->get('plugin.manager.workflow');
@@ -200,6 +215,7 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
     self::assertArrayHasKey('novapay_payment_url', $field_definitions);
     self::assertArrayHasKey('novapay_pending_operation', $field_definitions);
     self::assertArrayHasKey('novapay_pending_amount', $field_definitions);
+    self::assertArrayHasKey('novapay_pending_refund', $field_definitions);
     self::assertArrayHasKey('expires', $field_definitions);
 
   }
@@ -372,6 +388,159 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
       new Price('0', 'USD'),
       $this->order->getTotalPaid(),
     );
+  }
+
+  /**
+   * Tests partial quantities, postback confirmation, and cumulative limits.
+   */
+  public function testItemRefundLedgerWaitsForPostback(): void {
+    $payment = $this->createCompletedPayment('partial-refund-session');
+    $order_item_id = (int) $this->order->getItems()[0]->id();
+    $requests = [];
+    $api_client = $this->createMock(NovaPayApiClientInterface::class);
+    $api_client->method('voidPayment')->willReturnCallback(
+      static function (
+        RuntimeConfigurationProviderInterface $gateway,
+        VoidRequest $request,
+      ) use (&$requests): AcknowledgementResponse {
+        $requests[] = $request->toArray();
+        return new AcknowledgementResponse(200);
+      },
+    );
+    $manager = $this->createRefundOperationManager($api_client);
+
+    $manager->refund(
+      $payment,
+      $this->createRuntimeProvider(),
+      [$order_item_id => '0.5'],
+    );
+    self::assertSame([[
+      'session_id' => 'partial-refund-session',
+      'operations' => [[
+        'id' => 'operation-id',
+        'refund_amount' => '15',
+      ]],
+    ]], $requests);
+
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    self::assertSame('completed', $payment->getState()->getId());
+    self::assertEquals(new Price('0', 'USD'), $payment->getRefundedAmount());
+    self::assertSame('refund', $payment
+      ->get('novapay_pending_operation')->getString());
+    self::assertSame(0, $this->countRefundLedgerRows($payment));
+
+    $processing_event = NormalizedPostbackEvent::fromValues(
+      'partial-refund-session',
+      'processing_void',
+      [(string) $this->order->id()],
+    );
+    $manager->confirm(
+      $payment,
+      $processing_event,
+      hash('sha256', 'partial-processing'),
+    );
+    self::assertSame(0, $this->countRefundLedgerRows($payment));
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    $event = NormalizedPostbackEvent::fromValues(
+      'partial-refund-session',
+      'paid',
+      [(string) $this->order->id()],
+    );
+    $manager->confirm($payment, $event, hash('sha256', 'partial-confirmed'));
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    self::assertSame('partially_refunded', $payment->getState()->getId());
+    self::assertEquals(new Price('15', 'USD'), $payment->getRefundedAmount());
+    self::assertTrue($payment->get('novapay_pending_operation')->isEmpty());
+    self::assertSame(1, $this->countRefundLedgerRows($payment));
+
+    try {
+      $manager->refund(
+        $payment,
+        $this->createRuntimeProvider(),
+        [$order_item_id => '0.500001'],
+      );
+      self::fail('A refund must not exceed the remaining paid quantity.');
+    }
+    catch (InvalidRequestException $exception) {
+      self::assertStringContainsString('quantity', $exception->getMessage());
+    }
+    self::assertCount(1, $requests);
+
+    $manager->refund(
+      $payment,
+      $this->createRuntimeProvider(),
+      [$order_item_id => '0.5'],
+    );
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    $final_event = NormalizedPostbackEvent::fromValues(
+      'partial-refund-session',
+      'voided',
+      [(string) $this->order->id()],
+    );
+    $manager->confirm(
+      $payment,
+      $final_event,
+      hash('sha256', 'full-confirmed'),
+    );
+    (new PaymentStatusMapper())->apply($payment, NovaPayStatus::Voided);
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    self::assertSame('refunded', $payment->getState()->getId());
+    self::assertEquals(new Price('30', 'USD'), $payment->getRefundedAmount());
+    self::assertSame(2, $this->countRefundLedgerRows($payment));
+    self::assertFalse($manager->canRefund($payment));
+  }
+
+  /**
+   * Tests that an empty item selection submits and confirms a full refund.
+   */
+  public function testEmptySelectionRequestsFullRefund(): void {
+    $payment = $this->createCompletedPayment('full-refund-session');
+    $api_client = $this->createMock(NovaPayApiClientInterface::class);
+    $api_client->expects(self::once())->method('voidPayment')
+      ->with(
+        self::isInstanceOf(RuntimeConfigurationProviderInterface::class),
+        self::callback(static fn (VoidRequest $request): bool =>
+          $request->toArray() === ['session_id' => 'full-refund-session']),
+      )
+      ->willReturn(new AcknowledgementResponse(200));
+    $manager = $this->createRefundOperationManager($api_client);
+    $manager->refund($payment, $this->createRuntimeProvider(), []);
+
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    $processing_event = NormalizedPostbackEvent::fromValues(
+      'full-refund-session',
+      'processing_void',
+      [(string) $this->order->id()],
+    );
+    $manager->confirm(
+      $payment,
+      $processing_event,
+      hash('sha256', 'processing-full'),
+    );
+    self::assertSame(0, $this->countRefundLedgerRows($payment));
+
+    $final_event = NormalizedPostbackEvent::fromValues(
+      'full-refund-session',
+      'voided',
+      [(string) $this->order->id()],
+    );
+    $manager->confirm(
+      $payment,
+      $final_event,
+      hash('sha256', 'confirmed-full'),
+    );
+    (new PaymentStatusMapper())->apply($payment, NovaPayStatus::Voided);
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    self::assertSame('refunded', $payment->getState()->getId());
+    self::assertEquals(new Price('30', 'USD'), $payment->getRefundedAmount());
+    self::assertSame(1, $this->countRefundLedgerRows($payment));
   }
 
   /**
@@ -858,6 +1027,54 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
     self::assertInstanceOf(PaymentInterface::class, $payment);
     $payment->save();
     return $payment;
+  }
+
+  /**
+   * Creates a persisted completed payment for refund operation tests.
+   */
+  private function createCompletedPayment(string $session_id): PaymentInterface {
+    $payment_storage = $this->container
+      ->get('entity_type.manager')
+      ->getStorage('commerce_payment');
+    $payment = $payment_storage->create([
+      'payment_gateway' => $this->paymentGateway,
+      'order_id' => $this->order->id(),
+      'amount' => new Price('30', 'USD'),
+      'state' => 'completed',
+      'remote_id' => $session_id,
+      'remote_state' => 'paid',
+      'novapay_operation_id' => 'operation-id',
+    ]);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    $payment->save();
+    return $payment;
+  }
+
+  /**
+   * Creates the refund manager with a mocked one-shot API boundary.
+   */
+  private function createRefundOperationManager(
+    NovaPayApiClientInterface $api_client,
+  ): RefundOperationManager {
+    return new RefundOperationManager(
+      $this->container->get('entity_type.manager'),
+      $api_client,
+      $this->container->get('lock'),
+      $this->container->get('commerce_novapay.refund_ledger'),
+      $this->container->get('database'),
+    );
+  }
+
+  /**
+   * Counts confirmed ledger rows for one payment.
+   */
+  private function countRefundLedgerRows(PaymentInterface $payment): int {
+    return (int) $this->container->get('database')
+      ->select('commerce_novapay_refund_ledger', 'refund')
+      ->condition('payment_id', $payment->id())
+      ->countQuery()
+      ->execute()
+      ->fetchField();
   }
 
   /**

@@ -29,6 +29,7 @@ final class V2PostbackParser implements PostbackVersionParserInterface {
     }
 
     $external_ids = [];
+    $refunded_amounts = [];
     foreach ($payments as $payment) {
       if (
         !is_array($payment)
@@ -39,12 +40,16 @@ final class V2PostbackParser implements PostbackVersionParserInterface {
         throw InvalidPostbackException::unsupportedSchema();
       }
       $external_ids[] = $payment['external_id'];
+      if (array_key_exists('refunded_amount', $payment)) {
+        $refunded_amounts[] = $payment['refunded_amount'];
+      }
     }
 
     return NormalizedPostbackEvent::fromValues(
       $payload['id'] ?? NULL,
       $payload['status'] ?? NULL,
       $external_ids,
+      $refunded_amounts,
     );
   }
 

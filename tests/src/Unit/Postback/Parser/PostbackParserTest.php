@@ -65,6 +65,21 @@ final class PostbackParserTest extends TestCase {
   }
 
   /**
+   * Tests exact refund evidence normalization without float arithmetic.
+   */
+  public function testNormalizesExplicitRefundAmounts(): void {
+    $v1 = $this->parser->parse(
+      '{"id":"session","status":"paid","external_id":"1","amount":"30.00","refunded_amount":"10.25"}',
+    );
+    $v2 = $this->parser->parse(
+      '{"id":"session","status":"paid","payments":[{"external_id":"1","amount":"20","refunded_amount":"10.25"},{"external_id":"2","amount":"10","refunded_amount":5}]}',
+    );
+
+    self::assertSame('10.25', $v1->getEvent()->getRefundedAmount());
+    self::assertSame('15.25', $v2->getEvent()->getRefundedAmount());
+  }
+
+  /**
    * Tests fail-closed handling of malformed and unsupported schemas.
    */
   #[DataProvider('invalidPayloadProvider')]

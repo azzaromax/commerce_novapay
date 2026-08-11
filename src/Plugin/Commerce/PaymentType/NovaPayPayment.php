@@ -52,6 +52,12 @@ final class NovaPayPayment extends PaymentTypeBase {
       ))
       ->setSetting('max_length', 64);
 
+    $fields['novapay_pending_refund'] = BundleFieldDefinition::create('string_long')
+      ->setLabel(new TranslatableMarkup('Pending NovaPay refund'))
+      ->setDescription(new TranslatableMarkup(
+        'A bounded item selection retained until signed postback confirmation.',
+      ));
+
     return $fields;
   }
 

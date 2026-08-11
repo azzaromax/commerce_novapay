@@ -33,6 +33,9 @@ final class V1PostbackParser implements PostbackVersionParserInterface {
       $payload['id'] ?? NULL,
       $payload['status'] ?? NULL,
       [$payload['external_id']],
+      array_key_exists('refunded_amount', $payload)
+        ? [$payload['refunded_amount']]
+        : [],
     );
   }
 

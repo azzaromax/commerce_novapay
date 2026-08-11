@@ -13,9 +13,12 @@ use Drupal\commerce_novapay\Credential\NovaPayMode;
 use Drupal\commerce_novapay\Credential\RsaKeyValidatorInterface;
 use Drupal\commerce_novapay\Exception\InvalidRuntimeProfileException;
 use Drupal\commerce_novapay\Payment\AuthorizationOperationManagerInterface;
+use Drupal\commerce_novapay\Payment\RefundOperationManagerInterface;
+use Drupal\commerce_novapay\Payment\SupportsItemRefundsInterface;
 use Drupal\commerce_novapay\Phone\CustomerProfilePhoneInspectorInterface;
 use Drupal\commerce_novapay\PluginForm\NovaPayCaptureForm;
 use Drupal\commerce_novapay\PluginForm\NovaPayPaymentOffsiteForm;
+use Drupal\commerce_novapay\PluginForm\NovaPayRefundForm;
 use Drupal\commerce_novapay\PluginForm\NovaPayVoidForm;
 use Drupal\commerce_novapay\Postback\PostbackOutcome;
 use Drupal\commerce_novapay\Postback\PostbackProcessorInterface;
@@ -27,8 +30,10 @@ use Drupal\commerce_novapay\Runtime\TransactionMode;
 use Drupal\commerce_payment\Attribute\CommercePaymentGateway;
 use Drupal\commerce_payment\Entity\PaymentGatewayInterface;
 use Drupal\commerce_payment\Entity\PaymentInterface;
+use Drupal\commerce_payment\Exception\InvalidRequestException;
 use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\OffsitePaymentGatewayBase;
 use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\SupportsAuthorizationsInterface;
+use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\SupportsRefundsInterface;
 use Drupal\commerce_price\Price;
 use Drupal\commerce_order\Entity\OrderInterface;
 use Psr\Log\LoggerInterface;
@@ -51,13 +56,14 @@ use Symfony\Component\HttpFoundation\Response;
   forms: [
     'offsite-payment' => NovaPayPaymentOffsiteForm::class,
     'capture-payment' => NovaPayCaptureForm::class,
+    'refund-payment' => NovaPayRefundForm::class,
     'void-payment' => NovaPayVoidForm::class,
   ],
   payment_method_types: ['credit_card'],
   payment_type: 'novapay_payment',
   requires_billing_information: FALSE,
 )]
-final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigurationProviderInterface, SupportsAuthorizationsInterface {
+final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigurationProviderInterface, SupportsAuthorizationsInterface, SupportsItemRefundsInterface, SupportsRefundsInterface {
 
   private const MAX_KEY_BYTES = 65536;
 
@@ -100,6 +106,11 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
    * The serialized NovaPay capture/void operation manager.
    */
   private AuthorizationOperationManagerInterface $authorizationOperationManager;
+
+  /**
+   * The serialized NovaPay refund manager and confirmed item ledger.
+   */
+  private RefundOperationManagerInterface $refundOperationManager;
 
   /**
    * {@inheritdoc}
@@ -146,6 +157,9 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
     );
     $instance->authorizationOperationManager = $container->get(
       'commerce_novapay.authorization_operation_manager',
+    );
+    $instance->refundOperationManager = $container->get(
+      'commerce_novapay.refund_operation_manager',
     );
 
     return $instance;
@@ -488,6 +502,50 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
    */
   public function voidPayment(PaymentInterface $payment): void {
     $this->authorizationOperationManager->void($payment, $this);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function canRefundPayment(PaymentInterface $payment): bool {
+    return $this->refundOperationManager->canRefund($payment);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function refundPayment(
+    PaymentInterface $payment,
+    ?Price $amount = NULL,
+  ): void {
+    $balance = $payment->getBalance();
+    if (
+      $amount !== NULL
+      && (!$balance instanceof Price || !$amount->equals($balance))
+    ) {
+      throw InvalidRequestException::createForPayment(
+        $payment,
+        'Use the NovaPay item quantities for a partial refund.',
+      );
+    }
+    $this->refundOperationManager->refund($payment, $this);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getRefundableItems(PaymentInterface $payment): array {
+    return $this->refundOperationManager->getRefundableItems($payment);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function refundItems(
+    PaymentInterface $payment,
+    array $quantities,
+  ): void {
+    $this->refundOperationManager->refund($payment, $this, $quantities);
   }
 
   /**

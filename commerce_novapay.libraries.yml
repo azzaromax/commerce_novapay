@@ -1,0 +1,6 @@
+refund_form:
+  js:
+    js/refund-form.js: {}
+  dependencies:
+    - core/drupal
+    - core/once

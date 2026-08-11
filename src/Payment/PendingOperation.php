@@ -10,6 +10,7 @@ namespace Drupal\commerce_novapay\Payment;
 enum PendingOperation: string {
 
   case Capture = 'capture';
+  case Refund = 'refund';
   case Void = 'void';
 
 }

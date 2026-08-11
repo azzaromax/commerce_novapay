@@ -24,6 +24,7 @@ final class PaymentStatusMapper implements PaymentStatusMapperInterface {
     $transition_id = $this->getTransitionId($state->getId(), $status);
     if ($transition_id !== NULL) {
       $this->applyConfirmedCaptureAmount($payment, $status);
+      $this->applyConfirmedFullRefund($payment, $status);
       $this->clearPendingOperation($payment);
       $state->applyTransitionById($transition_id);
       $payment->setRemoteState($status->value);
@@ -37,6 +38,30 @@ final class PaymentStatusMapper implements PaymentStatusMapperInterface {
     ) {
       $payment->setRemoteState($status->value);
       $payment->save();
+    }
+  }
+
+  /**
+   * Keeps Commerce balance consistent for a signed full-refund postback.
+   */
+  private function applyConfirmedFullRefund(
+    PaymentInterface $payment,
+    NovaPayStatus $status,
+  ): void {
+    if ($status !== NovaPayStatus::Voided) {
+      return;
+    }
+    if (!in_array(
+      $payment->getState()->getId(),
+      ['completed', 'partially_refunded'],
+      TRUE,
+    )) {
+      return;
+    }
+
+    $amount = $payment->getAmount();
+    if ($amount instanceof Price) {
+      $payment->setRefundedAmount($amount);
     }
   }
 

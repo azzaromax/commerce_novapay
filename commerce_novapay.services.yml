@@ -53,6 +53,27 @@ services:
   Drupal\commerce_novapay\Payment\AuthorizationOperationManagerInterface:
     alias: commerce_novapay.authorization_operation_manager
 
+  commerce_novapay.refund_ledger:
+    class: Drupal\commerce_novapay\Payment\RefundLedgerRepository
+    arguments:
+      - '@database'
+      - '@datetime.time'
+
+  Drupal\commerce_novapay\Payment\RefundLedgerRepositoryInterface:
+    alias: commerce_novapay.refund_ledger
+
+  commerce_novapay.refund_operation_manager:
+    class: Drupal\commerce_novapay\Payment\RefundOperationManager
+    arguments:
+      - '@entity_type.manager'
+      - '@commerce_novapay.api_client'
+      - '@lock'
+      - '@commerce_novapay.refund_ledger'
+      - '@database'
+
+  Drupal\commerce_novapay\Payment\RefundOperationManagerInterface:
+    alias: commerce_novapay.refund_operation_manager
+
   commerce_novapay.order_payload_builder:
     class: Drupal\commerce_novapay\Order\OrderPayloadBuilder
     arguments:
@@ -113,6 +134,7 @@ services:
       - '@commerce_novapay.postback.status_mapper'
       - '@commerce_novapay.postback.event_repository'
       - '@lock'
+      - '@commerce_novapay.refund_operation_manager'
 
   Drupal\commerce_novapay\Postback\PostbackProcessorInterface:
     alias: commerce_novapay.postback.processor

@@ -10,6 +10,7 @@ use Drupal\commerce_novapay\Credential\NovaPayMode;
 use Drupal\commerce_novapay\Exception\InvalidPostbackException;
 use Drupal\commerce_novapay\Exception\PostbackProcessingException;
 use Drupal\commerce_novapay\Payment\SessionLockName;
+use Drupal\commerce_novapay\Payment\RefundOperationManagerInterface;
 use Drupal\commerce_novapay\Postback\Dto\NormalizedPostbackEvent;
 use Drupal\commerce_novapay\Postback\Parser\PostbackParserInterface;
 use Drupal\commerce_novapay\Runtime\RuntimeConfigurationProviderInterface;
@@ -34,6 +35,7 @@ final class PostbackProcessor implements PostbackProcessorInterface {
     private readonly PaymentStatusMapperInterface $status_mapper,
     private readonly PostbackEventRepositoryInterface $event_repository,
     private readonly LockBackendInterface $lock,
+    private readonly RefundOperationManagerInterface $refund_manager,
   ) {}
 
   /**
@@ -80,17 +82,19 @@ final class PostbackProcessor implements PostbackProcessorInterface {
     }
 
     try {
+      $event_key = hash('sha256', $raw_body);
       $outcome = $this->event_repository->processOnce(
-        hash('sha256', $raw_body),
+        $event_key,
         $event->getSessionId(),
         (string) $gateway->id(),
         $event->getStatus(),
-        function () use ($gateway, $event): PostbackOutcome {
+        function () use ($gateway, $event, $event_key): PostbackOutcome {
           $payment = $this->findPayment($gateway, $event);
           if ($payment === NULL) {
             return PostbackOutcome::UnknownPayment;
           }
 
+          $this->refund_manager->confirm($payment, $event, $event_key);
           $this->status_mapper->apply($payment, $event->getStatus());
           return PostbackOutcome::Applied;
         },

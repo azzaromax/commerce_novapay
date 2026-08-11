@@ -10,6 +10,7 @@ use Drupal\commerce_novapay\Credential\Credentials;
 use Drupal\commerce_novapay\Credential\NovaPayMode;
 use Drupal\commerce_novapay\Exception\InvalidPostbackException;
 use Drupal\commerce_novapay\Payment\SessionLockName;
+use Drupal\commerce_novapay\Payment\RefundOperationManagerInterface;
 use Drupal\commerce_novapay\Postback\Dto\NormalizedPostbackEvent;
 use Drupal\commerce_novapay\Postback\Dto\ParsedPostback;
 use Drupal\commerce_novapay\Postback\NovaPayStatus;
@@ -77,6 +78,11 @@ final class PostbackProcessorTest extends TestCase {
   private LockBackendInterface&MockObject $lock;
 
   /**
+   * The postback-confirmed refund operation manager.
+   */
+  private RefundOperationManagerInterface&MockObject $refundManager;
+
+  /**
    * The current NovaPay payment gateway.
    */
   private PaymentGatewayInterface&MockObject $gateway;
@@ -121,6 +127,9 @@ final class PostbackProcessorTest extends TestCase {
     );
     $this->lock = $this->createMock(LockBackendInterface::class);
     $this->lock->method('acquire')->willReturn(TRUE);
+    $this->refundManager = $this->createMock(
+      RefundOperationManagerInterface::class,
+    );
     $this->gateway = $this->createMock(PaymentGatewayInterface::class);
     $this->gateway->method('id')->willReturn('novapay_test');
     $this->gatewayPlugin = $this->createMock(
@@ -137,6 +146,7 @@ final class PostbackProcessorTest extends TestCase {
       $this->statusMapper,
       $this->eventRepository,
       $this->lock,
+      $this->refundManager,
     );
   }
 
@@ -269,7 +279,8 @@ final class PostbackProcessorTest extends TestCase {
    */
   public function testAppliesVerifiedNormalizedEvent(): void {
     $this->verifier->method('verify')->willReturn(TRUE);
-    $this->parser->method('parse')->willReturn($this->createParsedPostback());
+    $parsed = $this->createParsedPostback();
+    $this->parser->method('parse')->willReturn($parsed);
     $payment = $this->createMock(PaymentInterface::class);
     $payment_storage = $this->createMock(PaymentStorageInterface::class);
     $payment_storage->expects(self::once())->method('loadByProperties')
@@ -282,6 +293,12 @@ final class PostbackProcessorTest extends TestCase {
       ->with('commerce_payment')->willReturn($payment_storage);
     $this->statusMapper->expects(self::once())->method('apply')
       ->with($payment, NovaPayStatus::Holded);
+    $this->refundManager->expects(self::once())->method('confirm')
+      ->with(
+        $payment,
+        $parsed->getEvent(),
+        hash('sha256', 'verified-json'),
+      );
 
     $result = $this->processor->process(
       $this->gateway,
@@ -319,6 +336,7 @@ final class PostbackProcessorTest extends TestCase {
       $this->statusMapper,
       $this->eventRepository,
       $this->lock,
+      $this->refundManager,
     );
     $this->entityTypeManager->expects(self::never())->method('getStorage');
     $this->statusMapper->expects(self::never())->method('apply');
@@ -358,6 +376,7 @@ final class PostbackProcessorTest extends TestCase {
       $this->statusMapper,
       $this->eventRepository,
       $this->lock,
+      $this->refundManager,
     );
 
     $result = $this->processor->process(

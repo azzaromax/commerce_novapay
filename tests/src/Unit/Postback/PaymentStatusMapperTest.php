@@ -7,6 +7,7 @@ namespace Drupal\Tests\commerce_novapay\Unit\Postback;
 use Drupal\commerce_novapay\Postback\NovaPayStatus;
 use Drupal\commerce_novapay\Postback\PaymentStatusMapper;
 use Drupal\commerce_payment\Entity\PaymentInterface;
+use Drupal\commerce_price\Price;
 use Drupal\state_machine\Plugin\Field\FieldType\StateItemInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -39,6 +40,12 @@ final class PaymentStatusMapperTest extends TestCase {
     else {
       $state->expects(self::once())->method('applyTransitionById')
         ->with($transition_id);
+    }
+    if ($current_state === 'completed' && $remote_status === NovaPayStatus::Voided) {
+      $amount = new Price('30', 'UAH');
+      $payment->method('getAmount')->willReturn($amount);
+      $payment->expects(self::once())->method('setRefundedAmount')
+        ->with($amount)->willReturnSelf();
     }
     $payment->expects(self::once())->method('setRemoteState')
       ->with($remote_status->value)->willReturnSelf();

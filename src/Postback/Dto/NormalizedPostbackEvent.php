@@ -6,6 +6,7 @@ namespace Drupal\commerce_novapay\Postback\Dto;
 
 use Drupal\commerce_novapay\Exception\InvalidPostbackException;
 use Drupal\commerce_novapay\Postback\NovaPayStatus;
+use Drupal\commerce_price\Calculator;
 
 /**
  * Contains the payment-relevant fields shared by postback v1 and v2.
@@ -23,11 +24,14 @@ final class NormalizedPostbackEvent {
    *   The documented NovaPay status.
    * @param list<string> $external_ids
    *   Unique external order identifiers from the postback.
+   * @param string|null $refunded_amount
+   *   Exact explicitly reported refund amount, when present.
    */
   private function __construct(
     private readonly string $session_id,
     private readonly NovaPayStatus $status,
     private readonly array $external_ids,
+    private readonly ?string $refunded_amount,
   ) {}
 
   /**
@@ -39,11 +43,14 @@ final class NormalizedPostbackEvent {
    *   The raw NovaPay status.
    * @param list<mixed> $external_ids
    *   Raw external identifiers.
+   * @param list<mixed> $refunded_amounts
+   *   Explicit per-operation refund amounts, when present.
    */
   public static function fromValues(
     mixed $session_id,
     mixed $status,
     array $external_ids,
+    array $refunded_amounts = [],
   ): self {
     $session_id = self::validateIdentifier($session_id);
     if (!is_string($status)) {
@@ -60,10 +67,17 @@ final class NormalizedPostbackEvent {
       $normalized_external_ids[$external_id] = $external_id;
     }
 
+    $refunded_amount = NULL;
+    foreach ($refunded_amounts as $amount) {
+      $amount = self::validateAmount($amount);
+      $refunded_amount = Calculator::add($refunded_amount ?? '0', $amount);
+    }
+
     return new self(
       $session_id,
       $status,
       array_values($normalized_external_ids),
+      $refunded_amount,
     );
   }
 
@@ -92,6 +106,13 @@ final class NormalizedPostbackEvent {
   }
 
   /**
+   * Gets the exact explicitly reported total refunded amount.
+   */
+  public function getRefundedAmount(): ?string {
+    return $this->refunded_amount;
+  }
+
+  /**
    * Validates a bounded identifier without control characters.
    */
   private static function validateIdentifier(mixed $value): string {
@@ -108,6 +129,27 @@ final class NormalizedPostbackEvent {
     }
 
     return $value;
+  }
+
+  /**
+   * Converts a JSON numeric token to a bounded non-negative decimal string.
+   */
+  private static function validateAmount(mixed $value): string {
+    if (is_int($value)) {
+      $value = (string) $value;
+    }
+    elseif (is_float($value) && is_finite($value)) {
+      $encoded = json_encode($value, JSON_PRESERVE_ZERO_FRACTION);
+      $value = is_string($encoded) ? $encoded : '';
+    }
+    if (
+      !is_string($value)
+      || preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/D', $value) !== 1
+    ) {
+      throw InvalidPostbackException::unsupportedSchema();
+    }
+
+    return Calculator::trim($value);
   }
 
 }
