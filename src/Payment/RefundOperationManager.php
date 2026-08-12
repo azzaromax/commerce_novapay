@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Drupal\commerce_novapay\Payment;
 
 use Drupal\Core\Database\Connection;
+use Drupal\Core\Entity\Display\EntityFormDisplayInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Lock\LockBackendInterface;
+use Drupal\commerce_novapay\Api\Dto\Request\GetStatusRequest;
 use Drupal\commerce_novapay\Api\Dto\Request\VoidRequest;
 use Drupal\commerce_novapay\Api\NovaPayApiClientInterface;
 use Drupal\commerce_novapay\Exception\ApiFatalException;
@@ -18,6 +20,7 @@ use Drupal\commerce_novapay\Postback\Dto\NormalizedPostbackEvent;
 use Drupal\commerce_novapay\Postback\NovaPayStatus;
 use Drupal\commerce_novapay\Runtime\RuntimeConfigurationProviderInterface;
 use Drupal\commerce_order\Entity\OrderInterface;
+use Drupal\commerce_order\Entity\OrderItemInterface;
 use Drupal\commerce_payment\Entity\PaymentInterface;
 use Drupal\commerce_payment\Exception\InvalidRequestException;
 use Drupal\commerce_payment\Exception\PaymentGatewayException;
@@ -57,6 +60,23 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
         && $payment->getBalance() instanceof Price
         && $payment->getBalance()->isPositive()
         && $this->getRefundableItems($payment) !== [];
+    }
+    catch (\Throwable) {
+      return FALSE;
+    }
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function canCheckStatus(PaymentInterface $payment): bool {
+    try {
+      return $payment->hasField('novapay_pending_operation')
+        && $payment->get('novapay_pending_operation')->getString()
+          === PendingOperation::Refund->value
+        && $payment->hasField('novapay_pending_refund')
+        && !$payment->get('novapay_pending_refund')->isEmpty()
+        && trim((string) $payment->getRemoteId()) !== '';
     }
     catch (\Throwable) {
       return FALSE;
@@ -110,6 +130,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
         $ordered_quantity,
         $refunded_quantity,
         $available_quantity,
+        $this->getQuantityStep($order_item),
         $unit_price,
       );
     }
@@ -161,6 +182,10 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
       $items = $is_full
         ? $this->buildFullSelection($current)
         : $this->buildPartialSelection($current, $quantities);
+      if (!$is_full && $this->isCompleteSelection($current, $items)) {
+        $is_full = TRUE;
+        $items = $this->buildFullSelection($current);
+      }
       $amount = $this->getSelectionTotal($items, $current);
       $operation_id = trim(
         $current->get('novapay_operation_id')->getString(),
@@ -197,6 +222,141 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
           previous: $exception,
         );
       }
+    }
+    finally {
+      $this->lock->release($lock_name);
+    }
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function checkStatus(
+    PaymentInterface $payment,
+    RuntimeConfigurationProviderInterface $gateway,
+  ): RefundStatusCheckResult {
+    $payment_id = $this->requirePaymentId($payment);
+    $session_id = trim((string) $payment->getRemoteId());
+    if ($session_id === '') {
+      throw InvalidRequestException::createForPayment(
+        $payment,
+        'The NovaPay session ID is unavailable.',
+      );
+    }
+
+    $lock_name = SessionLockName::fromSessionId($session_id);
+    if (!$this->lock->acquire($lock_name, self::LOCK_TIMEOUT_SECONDS)) {
+      throw PaymentGatewayException::createForPayment(
+        $payment,
+        'Another NovaPay operation is already being processed.',
+      );
+    }
+
+    try {
+      $current = $this->loadCurrentPayment($payment_id, $payment);
+      if (!$this->canCheckStatus($current)) {
+        throw InvalidRequestException::createForPayment(
+          $current,
+          'This payment has no pending NovaPay refund.',
+        );
+      }
+      if (trim((string) $current->getRemoteId()) !== $session_id) {
+        throw InvalidRequestException::createForPayment(
+          $current,
+          'The NovaPay session ID changed before the status check.',
+        );
+      }
+
+      try {
+        $response = $this->api_client->getStatus(
+          $gateway,
+          new GetStatusRequest($session_id),
+        );
+      }
+      catch (\Throwable $exception) {
+        throw PaymentGatewayException::createForPayment(
+          $current,
+          'The NovaPay refund status could not be checked.',
+          previous: $exception,
+        );
+      }
+      if ($response->getSessionId() !== $session_id) {
+        throw PaymentGatewayException::createForPayment(
+          $current,
+          'NovaPay returned an unexpected session status.',
+        );
+      }
+
+      [$is_full] = $this->decodePending($current);
+      $status = $response->getStatus();
+      $refunded_amount = NULL;
+      $operation_id = trim(
+        $current->get('novapay_operation_id')->getString(),
+      );
+      if ($operation_id !== '') {
+        $refunded_amount = $response->getRefundedAmount($operation_id);
+      }
+      elseif (!$is_full) {
+        throw InvalidRequestException::createForPayment(
+          $current,
+          'The NovaPay operation ID is unavailable.',
+        );
+      }
+
+      $confirmation_status = $status;
+      $may_confirm = $is_full && $status === NovaPayStatus::Voided;
+      if ($is_full && !$may_confirm && $refunded_amount !== NULL) {
+        $payment_amount = $current->getAmount();
+        if ($payment_amount instanceof Price) {
+          $reported = new Price(
+            $refunded_amount,
+            $payment_amount->getCurrencyCode(),
+          );
+          $may_confirm = $status === NovaPayStatus::Paid
+            && $reported->greaterThanOrEqual($payment_amount);
+          if ($may_confirm) {
+            $confirmation_status = NovaPayStatus::Voided;
+          }
+        }
+      }
+      elseif (!$is_full) {
+        $may_confirm = $status === NovaPayStatus::Paid
+          && $refunded_amount !== NULL;
+      }
+      if (!$may_confirm) {
+        return RefundStatusCheckResult::Pending;
+      }
+
+      $event = NormalizedPostbackEvent::fromValues(
+        $session_id,
+        $confirmation_status->value,
+        [],
+        $refunded_amount === NULL ? [] : [$refunded_amount],
+      );
+      $event_key = hash(
+        'sha256',
+        implode("\0", [
+          'status-check',
+          $session_id,
+          $confirmation_status->value,
+          $refunded_amount ?? '',
+        ]),
+      );
+      $this->confirm($current, $event, $event_key);
+      if ($this->canCheckStatus($current)) {
+        return RefundStatusCheckResult::Pending;
+      }
+
+      if (
+        $is_full
+        && $current->getState()->getId() !== 'refunded'
+        && $current->getState()->isTransitionAllowed('refund')
+      ) {
+        $current->getState()->applyTransitionById('refund');
+        $current->setRemoteState($status->value);
+        $current->save();
+      }
+      return RefundStatusCheckResult::Confirmed;
     }
     finally {
       $this->lock->release($lock_name);
@@ -317,6 +477,12 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
         throw InvalidRequestException::createForPayment(
           $payment,
           'The refund quantity exceeds the paid quantity.',
+        );
+      }
+      if (!$item->isQuantityMultiple($quantity)) {
+        throw InvalidRequestException::createForPayment(
+          $payment,
+          'The refund quantity does not match the order item quantity step.',
         );
       }
       $selections[] = new RefundSelection(
@@ -612,6 +778,45 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
   }
 
   /**
+   * Detects an explicit selection of the entire refundable payment balance.
+   *
+   * @param \Drupal\commerce_payment\Entity\PaymentInterface $payment
+   *   The current payment.
+   * @param list<\Drupal\commerce_novapay\Payment\RefundSelection> $selections
+   *   Validated submitted selections.
+   */
+  private function isCompleteSelection(
+    PaymentInterface $payment,
+    array $selections,
+  ): bool {
+    $balance = $payment->getBalance();
+    if (!$balance instanceof Price) {
+      return FALSE;
+    }
+
+    $selected_quantities = [];
+    foreach ($selections as $selection) {
+      $selected_quantities[$selection->getOrderItemId()]
+        = $selection->getQuantity();
+    }
+    $available_items = $this->getRefundableItems($payment);
+    if (count($selected_quantities) !== count($available_items)) {
+      return FALSE;
+    }
+    foreach ($available_items as $item) {
+      $selected = $selected_quantities[$item->getOrderItemId()] ?? NULL;
+      if (
+        !is_string($selected)
+        || Calculator::compare($selected, $item->getAvailableQuantity()) !== 0
+      ) {
+        return FALSE;
+      }
+    }
+
+    return $this->getSelectionTotal($selections, $payment)->equals($balance);
+  }
+
+  /**
    * Validates an exact non-negative quantity string.
    */
   private function normalizeQuantity(
@@ -641,6 +846,40 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     }
 
     return $quantity;
+  }
+
+  /**
+   * Gets the quantity widget step configured for an order item bundle.
+   *
+   * Commerce persists a disabled "Allow decimal quantities" setting as a
+   * step of 1, so the widget step represents both administrator settings.
+   */
+  private function getQuantityStep(OrderItemInterface $order_item): string {
+    $display_id = implode('.', [
+      'commerce_order_item',
+      $order_item->bundle(),
+      'default',
+    ]);
+    $display = $this->entity_type_manager
+      ->getStorage('entity_form_display')
+      ->load($display_id);
+    $component = $display instanceof EntityFormDisplayInterface
+      ? $display->getComponent('quantity')
+      : NULL;
+    $step = is_array($component)
+      && ($component['type'] ?? NULL) === 'commerce_quantity'
+      && is_array($component['settings'] ?? NULL)
+      ? $component['settings']['step'] ?? NULL
+      : NULL;
+    if (
+      !is_string($step)
+      || preg_match('/^(?:0\.[0-9]{1,6}|[1-9][0-9]*)$/D', $step) !== 1
+      || Calculator::compare($step, '0') <= 0
+    ) {
+      return '1';
+    }
+
+    return Calculator::trim($step);
   }
 
   /**

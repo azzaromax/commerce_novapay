@@ -7,10 +7,12 @@ namespace Drupal\commerce_novapay\Api;
 use Drupal\commerce_novapay\Api\Dto\Request\AddPaymentRequest;
 use Drupal\commerce_novapay\Api\Dto\Request\CompleteHoldRequest;
 use Drupal\commerce_novapay\Api\Dto\Request\CreateSessionRequest;
+use Drupal\commerce_novapay\Api\Dto\Request\GetStatusRequest;
 use Drupal\commerce_novapay\Api\Dto\Request\VoidRequest;
 use Drupal\commerce_novapay\Api\Dto\Response\AcknowledgementResponse;
 use Drupal\commerce_novapay\Api\Dto\Response\PaymentResponse;
 use Drupal\commerce_novapay\Api\Dto\Response\SessionResponse;
+use Drupal\commerce_novapay\Api\Dto\Response\SessionStatusResponse;
 use Drupal\commerce_novapay\Runtime\RuntimeConfigurationProviderInterface;
 
 /**
@@ -49,5 +51,13 @@ interface NovaPayApiClientInterface {
     RuntimeConfigurationProviderInterface $gateway,
     VoidRequest $request,
   ): AcknowledgementResponse;
+
+  /**
+   * Retrieves the authoritative status of a NovaPay session.
+   */
+  public function getStatus(
+    RuntimeConfigurationProviderInterface $gateway,
+    GetStatusRequest $request,
+  ): SessionStatusResponse;
 
 }

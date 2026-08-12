@@ -51,7 +51,10 @@ final class PaymentStatusMapperTest extends TestCase {
       ->with($remote_status->value)->willReturnSelf();
     $payment->expects(self::once())->method('save');
 
-    (new PaymentStatusMapper())->apply($payment, $remote_status);
+    self::assertSame(
+      $transition_id !== NULL || $remote_status === NovaPayStatus::Processing,
+      (new PaymentStatusMapper())->apply($payment, $remote_status),
+    );
   }
 
   /**
@@ -78,6 +81,18 @@ final class PaymentStatusMapperTest extends TestCase {
     ];
     yield 'expired' => ['pending', NovaPayStatus::Expired, 'expire'];
     yield 'failed' => ['pending', NovaPayStatus::Failed, 'fail'];
+    yield 'failed payment retried' => [
+      'failed', NovaPayStatus::Processing, 'retry',
+    ];
+    yield 'failed direct payment recovered' => [
+      'failed', NovaPayStatus::Paid, 'retry_authorize_capture',
+    ];
+    yield 'failed hold payment recovered' => [
+      'failed', NovaPayStatus::Holded, 'retry_authorize',
+    ];
+    yield 'failed hold payment captured' => [
+      'failed', NovaPayStatus::HoldConfirmed, 'retry_authorize_capture',
+    ];
     yield 'processing remains pending' => [
       'pending', NovaPayStatus::Processing, NULL,
     ];
@@ -95,7 +110,42 @@ final class PaymentStatusMapperTest extends TestCase {
     $payment->expects(self::never())->method('setRemoteState');
     $payment->expects(self::never())->method('save');
 
-    (new PaymentStatusMapper())->apply($payment, NovaPayStatus::Processing);
+    self::assertFalse(
+      (new PaymentStatusMapper())->apply(
+        $payment,
+        NovaPayStatus::Processing,
+      ),
+    );
+  }
+
+  /**
+   * Tests that paid cannot recover an irreversible Commerce payment state.
+   */
+  #[DataProvider('irreversibleStateProvider')]
+  public function testPaidCannotRecoverIrreversibleState(string $state_id): void {
+    $payment = $this->createMock(PaymentInterface::class);
+    $state = $this->createMock(StateItemInterface::class);
+    $state->method('getId')->willReturn($state_id);
+    $payment->method('getState')->willReturn($state);
+    $state->expects(self::never())->method('applyTransitionById');
+    $payment->expects(self::never())->method('setRemoteState');
+    $payment->expects(self::never())->method('save');
+
+    self::assertFalse(
+      (new PaymentStatusMapper())->apply($payment, NovaPayStatus::Paid),
+    );
+  }
+
+  /**
+   * Provides states that a later paid event must never recover.
+   *
+   * @return iterable<string, array{string}>
+   *   Irreversible Commerce state IDs.
+   */
+  public static function irreversibleStateProvider(): iterable {
+    yield 'expired payment' => ['expired'];
+    yield 'voided authorization' => ['authorization_voided'];
+    yield 'refunded payment' => ['refunded'];
   }
 
 }

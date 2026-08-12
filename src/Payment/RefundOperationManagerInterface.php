@@ -19,6 +19,11 @@ interface RefundOperationManagerInterface {
   public function canRefund(PaymentInterface $payment): bool;
 
   /**
+   * Checks whether a payment has a pending refund to reconcile.
+   */
+  public function canCheckStatus(PaymentInterface $payment): bool;
+
+  /**
    * Gets the current item-level refund availability.
    *
    * @param \Drupal\commerce_payment\Entity\PaymentInterface $payment
@@ -46,7 +51,15 @@ interface RefundOperationManagerInterface {
   ): void;
 
   /**
-   * Applies a refund intent only when a signed postback confirms it.
+   * Reconciles a pending refund against NovaPay's session status.
+   */
+  public function checkStatus(
+    PaymentInterface $payment,
+    RuntimeConfigurationProviderInterface $gateway,
+  ): RefundStatusCheckResult;
+
+  /**
+   * Applies a refund intent from an authoritative NovaPay confirmation.
    *
    * @param \Drupal\commerce_payment\Entity\PaymentInterface $payment
    *   The NovaPay payment.

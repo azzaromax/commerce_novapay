@@ -35,4 +35,16 @@ interface SupportsItemRefundsInterface {
     array $quantities,
   ): void;
 
+  /**
+   * Checks whether the payment has a pending refund status operation.
+   */
+  public function canCheckRefundStatus(PaymentInterface $payment): bool;
+
+  /**
+   * Checks and safely reconciles the pending refund at NovaPay.
+   */
+  public function checkRefundStatus(
+    PaymentInterface $payment,
+  ): RefundStatusCheckResult;
+
 }

@@ -189,7 +189,7 @@ final class PostbackProcessorTest extends TestCase {
     $this->entityTypeManager->method('getStorage')
       ->with('commerce_payment')->willReturn($payment_storage);
     $this->statusMapper->expects(self::once())->method('apply')
-      ->with($payment, NovaPayStatus::Holded);
+      ->with($payment, NovaPayStatus::Holded)->willReturn(TRUE);
 
     $result = $this->processor->process(
       $this->gateway,
@@ -292,7 +292,7 @@ final class PostbackProcessorTest extends TestCase {
     $this->entityTypeManager->method('getStorage')
       ->with('commerce_payment')->willReturn($payment_storage);
     $this->statusMapper->expects(self::once())->method('apply')
-      ->with($payment, NovaPayStatus::Holded);
+      ->with($payment, NovaPayStatus::Holded)->willReturn(TRUE);
     $this->refundManager->expects(self::once())->method('confirm')
       ->with(
         $payment,
@@ -308,6 +308,30 @@ final class PostbackProcessorTest extends TestCase {
     );
 
     self::assertSame(PostbackOutcome::Applied, $result->getOutcome());
+  }
+
+  /**
+   * Tests that a valid stale status is acknowledged without claiming mutation.
+   */
+  public function testIgnoredNormalizedEventIsReportedAccurately(): void {
+    $this->verifier->method('verify')->willReturn(TRUE);
+    $this->parser->method('parse')->willReturn($this->createParsedPostback());
+    $payment = $this->createMock(PaymentInterface::class);
+    $payment_storage = $this->createMock(PaymentStorageInterface::class);
+    $payment_storage->method('loadByProperties')->willReturn([$payment]);
+    $this->entityTypeManager->method('getStorage')
+      ->with('commerce_payment')->willReturn($payment_storage);
+    $this->statusMapper->expects(self::once())->method('apply')
+      ->with($payment, NovaPayStatus::Holded)->willReturn(FALSE);
+
+    $result = $this->processor->process(
+      $this->gateway,
+      $this->gatewayPlugin,
+      'ignored-json',
+      'valid-signature',
+    );
+
+    self::assertSame(PostbackOutcome::Ignored, $result->getOutcome());
   }
 
   /**

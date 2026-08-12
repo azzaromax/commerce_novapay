@@ -36,7 +36,7 @@ final class NovaPayRefundForm extends PaymentGatewayFormBase {
     $currency = $payment->getAmount()?->getCurrencyCode() ?? '';
 
     $form['#success_message'] = $this->t(
-      'Refund submitted to NovaPay. Payment and item totals will update after postback confirmation.',
+      'Refund submitted to NovaPay. Payment and item totals will update after NovaPay confirmation.',
     );
     $form['notice'] = [
       '#type' => 'item',
@@ -85,7 +85,7 @@ final class NovaPayRefundForm extends PaymentGatewayFormBase {
         '#default_value' => '',
         '#min' => 0,
         '#max' => $item->getAvailableQuantity(),
-        '#step' => '0.000001',
+        '#step' => $item->getQuantityStep(),
         '#attributes' => [
           'class' => ['commerce-novapay-refund-quantity'],
           'data-unit-price' => $item->getUnitPrice()->getNumber(),
@@ -153,10 +153,13 @@ final class NovaPayRefundForm extends PaymentGatewayFormBase {
           $quantity,
           $available[$id]->getAvailableQuantity(),
         ) > 0
+        || !$available[$id]->isQuantityMultiple($quantity)
       ) {
         $form_state->setError(
           $form['items'][$id]['quantity'],
-          $this->t('Enter a quantity no greater than the available paid quantity.'),
+          $this->t('Enter an available quantity that is a multiple of @step.', [
+            '@step' => $available[$id]->getQuantityStep(),
+          ]),
         );
       }
     }

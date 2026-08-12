@@ -9,6 +9,7 @@ use Drupal\Core\Lock\LockBackendInterface;
 use Drupal\commerce_novapay\Credential\NovaPayMode;
 use Drupal\commerce_novapay\Exception\InvalidPostbackException;
 use Drupal\commerce_novapay\Exception\PostbackProcessingException;
+use Drupal\commerce_novapay\Payment\PendingOperation;
 use Drupal\commerce_novapay\Payment\SessionLockName;
 use Drupal\commerce_novapay\Payment\RefundOperationManagerInterface;
 use Drupal\commerce_novapay\Postback\Dto\NormalizedPostbackEvent;
@@ -94,9 +95,18 @@ final class PostbackProcessor implements PostbackProcessorInterface {
             return PostbackOutcome::UnknownPayment;
           }
 
+          $pending_refund = $this->hasConfirmablePendingRefund(
+            $payment,
+            $event->getStatus(),
+          );
           $this->refund_manager->confirm($payment, $event, $event_key);
-          $this->status_mapper->apply($payment, $event->getStatus());
-          return PostbackOutcome::Applied;
+          $status_applied = $this->status_mapper->apply(
+            $payment,
+            $event->getStatus(),
+          );
+          return $status_applied || $pending_refund
+            ? PostbackOutcome::Applied
+            : PostbackOutcome::Ignored;
         },
       );
     }
@@ -206,6 +216,27 @@ final class PostbackProcessor implements PostbackProcessorInterface {
     ));
 
     return count($payments) === 1 ? $payments[0] : NULL;
+  }
+
+  /**
+   * Checks whether refund confirmation may mutate the payment before mapping.
+   */
+  private function hasConfirmablePendingRefund(
+    PaymentInterface $payment,
+    NovaPayStatus $status,
+  ): bool {
+    return in_array(
+      $status,
+      [
+        NovaPayStatus::ProcessingVoid,
+        NovaPayStatus::Paid,
+        NovaPayStatus::Voided,
+      ],
+      TRUE,
+    )
+      && $payment->hasField('novapay_pending_operation')
+      && $payment->get('novapay_pending_operation')->getString()
+        === PendingOperation::Refund->value;
   }
 
 }

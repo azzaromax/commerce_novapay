@@ -19,7 +19,7 @@ final class PaymentStatusMapper implements PaymentStatusMapperInterface {
   public function apply(
     PaymentInterface $payment,
     NovaPayStatus $status,
-  ): void {
+  ): bool {
     $state = $payment->getState();
     $transition_id = $this->getTransitionId($state->getId(), $status);
     if ($transition_id !== NULL) {
@@ -29,7 +29,7 @@ final class PaymentStatusMapper implements PaymentStatusMapperInterface {
       $state->applyTransitionById($transition_id);
       $payment->setRemoteState($status->value);
       $payment->save();
-      return;
+      return TRUE;
     }
 
     if (
@@ -38,7 +38,10 @@ final class PaymentStatusMapper implements PaymentStatusMapperInterface {
     ) {
       $payment->setRemoteState($status->value);
       $payment->save();
+      return TRUE;
     }
+
+    return FALSE;
   }
 
   /**
@@ -168,6 +171,14 @@ final class PaymentStatusMapper implements PaymentStatusMapperInterface {
         NovaPayStatus::Paid,
         NovaPayStatus::HoldConfirmed => 'capture',
         NovaPayStatus::Voided => 'void',
+        default => NULL,
+      },
+      'failed' => match ($status) {
+        NovaPayStatus::Created,
+        NovaPayStatus::Processing => 'retry',
+        NovaPayStatus::Holded => 'retry_authorize',
+        NovaPayStatus::Paid,
+        NovaPayStatus::HoldConfirmed => 'retry_authorize_capture',
         default => NULL,
       },
       'completed', 'partially_refunded' => match ($status) {

@@ -13,10 +13,13 @@ interface PaymentStatusMapperInterface {
 
   /**
    * Applies the remote state and an allowed Commerce workflow transition.
+   *
+   * @return bool
+   *   TRUE when the payment was changed and saved, FALSE for a safe no-op.
    */
   public function apply(
     PaymentInterface $payment,
     NovaPayStatus $status,
-  ): void;
+  ): bool;
 
 }

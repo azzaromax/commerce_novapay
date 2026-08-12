@@ -21,12 +21,12 @@ interface RefundLedgerRepositoryInterface {
   public function getRefundedQuantities(int $payment_id): array;
 
   /**
-   * Records one signed confirming postback atomically.
+   * Records one authoritative NovaPay confirmation atomically.
    *
    * @param int $payment_id
    *   Commerce payment identifier.
    * @param string $event_key
-   *   SHA-256 hash of the signed raw postback.
+   *   SHA-256 hash of the bounded confirming evidence.
    * @param list<\Drupal\commerce_novapay\Payment\RefundSelection> $items
    *   Confirmed item selections.
    */

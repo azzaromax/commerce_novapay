@@ -52,3 +52,15 @@ novapay_payment:
       label: 'Fail payment'
       from: [pending]
       to: failed
+    retry:
+      label: 'Retry payment'
+      from: [failed]
+      to: pending
+    retry_authorize:
+      label: 'Authorize retried payment'
+      from: [failed]
+      to: authorization
+    retry_authorize_capture:
+      label: 'Authorize and capture retried payment'
+      from: [failed]
+      to: completed

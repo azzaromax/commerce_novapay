@@ -7,11 +7,13 @@ namespace Drupal\commerce_novapay\Api;
 use Drupal\commerce_novapay\Api\Dto\Request\AddPaymentRequest;
 use Drupal\commerce_novapay\Api\Dto\Request\CompleteHoldRequest;
 use Drupal\commerce_novapay\Api\Dto\Request\CreateSessionRequest;
+use Drupal\commerce_novapay\Api\Dto\Request\GetStatusRequest;
 use Drupal\commerce_novapay\Api\Dto\Request\NovaPayRequestInterface;
 use Drupal\commerce_novapay\Api\Dto\Request\VoidRequest;
 use Drupal\commerce_novapay\Api\Dto\Response\AcknowledgementResponse;
 use Drupal\commerce_novapay\Api\Dto\Response\PaymentResponse;
 use Drupal\commerce_novapay\Api\Dto\Response\SessionResponse;
+use Drupal\commerce_novapay\Api\Dto\Response\SessionStatusResponse;
 use Drupal\commerce_novapay\Api\Dto\Response\ValidationViolation;
 use Drupal\commerce_novapay\Exception\ApiFatalException;
 use Drupal\commerce_novapay\Exception\ApiProcessingException;
@@ -118,6 +120,27 @@ final class NovaPayApiClient implements NovaPayApiClientInterface {
     return $this->createAcknowledgement(
       $this->post($configuration, '/v1/void', $request),
     );
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getStatus(
+    RuntimeConfigurationProviderInterface $gateway,
+    GetStatusRequest $request,
+  ): SessionStatusResponse {
+    $configuration = $gateway->getRuntimeConfiguration();
+    $response = $this->post($configuration, '/v1/get-status', $request);
+    $data = $this->decodeSuccessObject($response);
+
+    try {
+      return SessionStatusResponse::fromArray($data);
+    }
+    catch (\InvalidArgumentException) {
+      throw ApiUnexpectedResponseException::invalidSuccess(
+        $response->getStatusCode(),
+      );
+    }
   }
 
   /**

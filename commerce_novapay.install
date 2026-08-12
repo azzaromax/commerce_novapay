@@ -109,7 +109,7 @@ function commerce_novapay_schema(): array {
         'not null' => TRUE,
       ],
       'event_key' => [
-        'description' => 'SHA-256 hash of the confirming raw postback.',
+        'description' => 'SHA-256 hash of the confirming NovaPay evidence.',
         'type' => 'varchar_ascii',
         'length' => 64,
         'not null' => TRUE,

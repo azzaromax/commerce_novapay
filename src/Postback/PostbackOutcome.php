@@ -11,6 +11,7 @@ enum PostbackOutcome: string {
 
   case Applied = 'applied';
   case Duplicate = 'duplicate';
+  case Ignored = 'ignored';
   case InvalidPayload = 'invalid_payload';
   case InvalidSignature = 'invalid_signature';
   case UnknownPayment = 'unknown_payment';

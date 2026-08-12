@@ -7,6 +7,7 @@ namespace Drupal\Tests\commerce_novapay\Unit\Api;
 use Drupal\commerce_novapay\Api\Dto\Request\AddPaymentRequest;
 use Drupal\commerce_novapay\Api\Dto\Request\CompleteHoldRequest;
 use Drupal\commerce_novapay\Api\Dto\Request\CreateSessionRequest;
+use Drupal\commerce_novapay\Api\Dto\Request\GetStatusRequest;
 use Drupal\commerce_novapay\Api\Dto\Request\VoidRequest;
 use Drupal\commerce_novapay\Api\NovaPayApiClient;
 use Drupal\commerce_novapay\Credential\Credentials;
@@ -161,6 +162,49 @@ final class NovaPayApiClientTest extends TestCase {
         $transaction['request']->getUri()->getHost(),
       );
     }
+  }
+
+  /**
+   * Tests the read-only status endpoint and bounded refund projection.
+   */
+  public function testGetsRefundStatusWithoutRetainingSensitiveFields(): void {
+    $history = new \ArrayObject();
+    $client = $this->createClient(
+      [new Response(200, [], json_encode([
+        'id' => 'session-123',
+        'status' => 'paid',
+        'client_phone' => '+380501234567',
+        'pan' => '413417xxxx1001',
+        'operations' => [[
+          'transaction_id' => 'operation-1',
+          'refunded_amount' => 15,
+          'status' => 'voided',
+        ]],
+      ], JSON_THROW_ON_ERROR))],
+      $history,
+      $this->createRecordingSigner(),
+    );
+
+    $response = $client->getStatus(
+      $this->createGateway(NovaPayMode::Test),
+      new GetStatusRequest('session-123'),
+    );
+
+    self::assertSame('session-123', $response->getSessionId());
+    self::assertSame('paid', $response->getStatus()->value);
+    self::assertSame('15', $response->getRefundedAmount('operation-1'));
+    self::assertNull($response->getRefundedAmount('unknown'));
+    self::assertCount(1, $history);
+    /** @var array<mixed, mixed> $transaction */
+    $transaction = $history[0];
+    self::assertSame(
+      '/v1/get-status',
+      $transaction['request']->getUri()->getPath(),
+    );
+    self::assertSame(
+      '{"merchant_id":"2","session_id":"session-123"}',
+      (string) $transaction['request']->getBody(),
+    );
   }
 
   /**

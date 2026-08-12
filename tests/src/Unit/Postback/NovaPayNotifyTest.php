@@ -92,6 +92,14 @@ final class NovaPayNotifyTest extends TestCase {
       ),
       Response::HTTP_OK,
     ];
+    yield 'ignored' => [
+      PostbackResult::forEvent(
+        PostbackOutcome::Ignored,
+        PostbackVersion::V1,
+        NovaPayStatus::Processing,
+      ),
+      Response::HTTP_OK,
+    ];
   }
 
   /**

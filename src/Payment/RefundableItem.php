@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\commerce_novapay\Payment;
 
+use Drupal\commerce_price\Calculator;
 use Drupal\commerce_price\Price;
 
 /**
@@ -17,6 +18,7 @@ final class RefundableItem {
     private readonly string $ordered_quantity,
     private readonly string $refunded_quantity,
     private readonly string $available_quantity,
+    private readonly string $quantity_step,
     private readonly Price $unit_price,
   ) {}
 
@@ -53,6 +55,21 @@ final class RefundableItem {
    */
   public function getAvailableQuantity(): string {
     return $this->available_quantity;
+  }
+
+  /**
+   * Gets the configured Commerce quantity increment.
+   */
+  public function getQuantityStep(): string {
+    return $this->quantity_step;
+  }
+
+  /**
+   * Checks whether a quantity is a multiple of the configured increment.
+   */
+  public function isQuantityMultiple(string $quantity): bool {
+    $units = Calculator::divide($quantity, $this->quantity_step);
+    return Calculator::compare($units, Calculator::floor($units)) === 0;
   }
 
   /**
