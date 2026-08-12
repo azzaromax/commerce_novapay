@@ -729,6 +729,67 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
   }
 
   /**
+   * Tests atomic rollback when a full-refund workflow save fails.
+   */
+  public function testFullRefundStatusCheckRollsBackFailedTransition(): void {
+    $payment = $this->createCompletedPayment('status-rollback-session');
+    $api_client = $this->createMock(NovaPayApiClientInterface::class);
+    $api_client->method('voidPayment')
+      ->willReturn(new AcknowledgementResponse(200));
+    $api_client->method('getStatus')
+      ->willReturn(SessionStatusResponse::fromArray([
+        'id' => 'status-rollback-session',
+        'status' => 'voided',
+      ]));
+    $manager = $this->createRefundOperationManager($api_client);
+    $manager->refund($payment, $this->createRuntimeProvider());
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+
+    $database = $this->container->get('database');
+    $schema = rtrim($database->getPrefix(), '.');
+    self::assertMatchesRegularExpression('/^[A-Za-z0-9_]+$/D', $schema);
+    $trigger = sprintf(
+      '"%s"."commerce_novapay_test_refund_failure"',
+      $schema,
+    );
+    $database->query(
+      "CREATE TRIGGER $trigger
+      BEFORE UPDATE ON commerce_payment
+      WHEN NEW.state = 'refunded'
+      BEGIN
+        SELECT RAISE(FAIL, 'forced refund transition failure');
+      END",
+      [],
+      ['allow_delimiter_in_query' => TRUE],
+    );
+    try {
+      $manager->checkStatus($payment, $this->createRuntimeProvider());
+      self::fail('A failed workflow save must abort refund reconciliation.');
+    }
+    catch (PaymentGatewayException $exception) {
+      self::assertStringContainsString(
+        'atomically',
+        $exception->getMessage(),
+      );
+    }
+    finally {
+      $database->query("DROP TRIGGER $trigger");
+    }
+
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    self::assertSame('completed', $payment->getState()->getId());
+    self::assertEquals(new Price('0', 'USD'), $payment->getRefundedAmount());
+    self::assertSame(
+      'refund',
+      $payment->get('novapay_pending_operation')->getString(),
+    );
+    self::assertFalse($payment->get('novapay_pending_refund')->isEmpty());
+    self::assertSame(0, $this->countRefundLedgerRows($payment));
+  }
+
+  /**
    * Tests refund quantities against the order item widget configuration.
    */
   public function testRefundQuantityUsesOrderItemTypeStep(): void {

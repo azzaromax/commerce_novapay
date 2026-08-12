@@ -342,19 +342,32 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
           $refunded_amount ?? '',
         ]),
       );
-      $this->confirm($current, $event, $event_key);
-      if ($this->canCheckStatus($current)) {
-        return RefundStatusCheckResult::Pending;
-      }
+      $transaction = $this->database->startTransaction();
+      try {
+        $this->confirm($current, $event, $event_key);
+        if ($this->canCheckStatus($current)) {
+          $transaction->commitOrRelease();
+          return RefundStatusCheckResult::Pending;
+        }
 
-      if (
-        $is_full
-        && $current->getState()->getId() !== 'refunded'
-        && $current->getState()->isTransitionAllowed('refund')
-      ) {
-        $current->getState()->applyTransitionById('refund');
-        $current->setRemoteState($status->value);
-        $current->save();
+        if (
+          $is_full
+          && $current->getState()->getId() !== 'refunded'
+          && $current->getState()->isTransitionAllowed('refund')
+        ) {
+          $current->getState()->applyTransitionById('refund');
+          $current->setRemoteState($status->value);
+          $current->save();
+        }
+        $transaction->commitOrRelease();
+      }
+      catch (\Throwable $exception) {
+        $transaction->rollBack();
+        throw PaymentGatewayException::createForPayment(
+          $current,
+          'The confirmed NovaPay refund could not be saved atomically.',
+          previous: $exception,
+        );
       }
       return RefundStatusCheckResult::Confirmed;
     }
