@@ -201,6 +201,41 @@ final class NovaPayUploadTest extends TestCase {
   }
 
   /**
+   * Tests that the form explains how existing live keys are preserved.
+   */
+  public function testLiveKeyStatusExplainsKeyPreservation(): void {
+    $plugin = new NovaPay([], 'novapay', []);
+    $string_translation = $this->createMock(TranslationInterface::class);
+    $string_translation->method('translateString')
+      ->willReturnCallback(
+        static fn (TranslatableMarkup $markup): string =>
+          $markup->getUntranslatedString(),
+      );
+    $plugin->setStringTranslation($string_translation);
+    $method = new \ReflectionMethod($plugin, 'buildLiveKeyStatus');
+
+    $status = $method->invoke($plugin, TRUE);
+
+    self::assertSame('Keys installed', (string) $status['#title']);
+    self::assertSame(
+      ['messages', 'messages--status'],
+      $status['#wrapper_attributes']['class'],
+    );
+    self::assertStringContainsString(
+      'Both live keys are installed',
+      (string) $status['#markup'],
+    );
+    self::assertStringContainsString(
+      'Leave both upload fields empty to keep them unchanged',
+      (string) $status['#markup'],
+    );
+    self::assertStringContainsString(
+      'Changing the Merchant ID does not replace the keys',
+      (string) $status['#markup'],
+    );
+  }
+
+  /**
    * Creates a plugin with phone readiness and string translation dependencies.
    */
   private function createPhoneValidationPlugin(

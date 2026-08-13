@@ -186,7 +186,7 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
     $form = parent::buildConfigurationForm($form, $form_state);
     $profile = NULL;
     $profile_error = FALSE;
-    $has_live_keys = FALSE;
+    $has_live_keys = NULL;
 
     try {
       $gateway_uuid = $this->getGatewayUuid($form_state);
@@ -257,22 +257,28 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
       '#default_value' => $profile?->getMerchantId() ?? '',
       '#maxlength' => 128,
     ];
-    $form['runtime_settings']['live_credentials']['private_key_upload'] = [
+    $form['runtime_settings']['live_credentials']['keys'] = [
+      '#type' => 'fieldset',
+      '#title' => $this->t('Live keys'),
+    ];
+    $form['runtime_settings']['live_credentials']['keys']['key_status'] =
+      $this->buildLiveKeyStatus($has_live_keys);
+    $form['runtime_settings']['live_credentials']['keys']['private_key_upload'] = [
       '#type' => 'file',
       '#parents' => ['novapay_private_key_upload'],
       '#title' => $this->t('Merchant private key'),
-      '#description' => $has_live_keys
-        ? $this->t('A live key is stored locally. Upload both keys to rotate them.')
-        : $this->t('Upload a PEM-encoded RSA private key.'),
+      '#description' => $this->t(
+        'Select this file together with the NovaPay public key to install or replace both keys.',
+      ),
       '#accept' => '.pem,.key,text/plain,application/x-pem-file',
     ];
-    $form['runtime_settings']['live_credentials']['public_key_upload'] = [
+    $form['runtime_settings']['live_credentials']['keys']['public_key_upload'] = [
       '#type' => 'file',
       '#parents' => ['novapay_public_key_upload'],
       '#title' => $this->t('NovaPay public key'),
-      '#description' => $has_live_keys
-        ? $this->t('A live key is stored locally. Upload both keys to rotate them.')
-        : $this->t('Upload the PEM-encoded RSA public key supplied by NovaPay.'),
+      '#description' => $this->t(
+        'Select this file together with the merchant private key to install or replace both keys.',
+      ),
       '#accept' => '.pem,.key,text/plain,application/x-pem-file',
     ];
 
@@ -316,6 +322,49 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
     ];
 
     return $form;
+  }
+
+  /**
+   * Builds a secret-free explanation of the current live key state.
+   *
+   * @param bool|null $has_live_keys
+   *   Whether both valid live keys are installed, or NULL when unavailable.
+   *
+   * @return array<string, mixed>
+   *   The key status form element.
+   */
+  private function buildLiveKeyStatus(?bool $has_live_keys): array {
+    if ($has_live_keys === TRUE) {
+      $title = $this->t('Keys installed');
+      $message = $this->t(
+        'Both live keys are installed for this payment gateway. Leave both upload fields empty to keep them unchanged. To replace them, upload both files together. Changing the Merchant ID does not replace the keys.',
+      );
+      $message_type = 'status';
+    }
+    elseif ($has_live_keys === FALSE) {
+      $title = $this->t('Keys not installed');
+      $message = $this->t(
+        'Live keys are not installed. Upload both key files together before saving live mode. After installation, leave both upload fields empty to keep the keys unchanged. Changing the Merchant ID does not replace the keys.',
+      );
+      $message_type = 'warning';
+    }
+    else {
+      $title = $this->t('Key status unavailable');
+      $message = $this->t(
+        'The live key status is unavailable because the local settings could not be read. Existing keys are never displayed. Upload both files together only when installing or replacing the keys.',
+      );
+      $message_type = 'warning';
+    }
+
+    return [
+      '#type' => 'item',
+      '#title' => $title,
+      '#markup' => $message,
+      '#wrapper_attributes' => [
+        'class' => ['messages', 'messages--' . $message_type],
+        'role' => 'status',
+      ],
+    ];
   }
 
   /**
@@ -665,11 +714,11 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
     if (($private_upload === NULL) !== ($public_upload === NULL)) {
       $message = $this->t('Upload both live key files together.');
       $form_state->setError(
-        $form['runtime_settings']['live_credentials']['private_key_upload'],
+        $form['runtime_settings']['live_credentials']['keys']['private_key_upload'],
         $message,
       );
       $form_state->setError(
-        $form['runtime_settings']['live_credentials']['public_key_upload'],
+        $form['runtime_settings']['live_credentials']['keys']['public_key_upload'],
         $message,
       );
       return;
@@ -678,7 +727,7 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
     if ($private_upload === NULL && $public_upload === NULL) {
       if (!$this->runtimeProfileStorage->hasValidLiveKeys($gateway_uuid)) {
         $form_state->setError(
-          $form['runtime_settings']['live_credentials']['private_key_upload'],
+          $form['runtime_settings']['live_credentials']['keys']['private_key_upload'],
           $this->t('Upload both live key files.'),
         );
       }
@@ -696,7 +745,7 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
     }
     catch (\RuntimeException) {
       $form_state->setError(
-        $form['runtime_settings']['live_credentials'],
+        $form['runtime_settings']['live_credentials']['keys'],
         $this->t('Upload valid RSA private and public PEM files.'),
       );
     }
