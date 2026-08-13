@@ -335,6 +335,32 @@ final class PostbackProcessorTest extends TestCase {
   }
 
   /**
+   * Tests that a stale created event is reported as ignored.
+   */
+  public function testCreatedEventForFailedPaymentIsIgnored(): void {
+    $this->verifier->method('verify')->willReturn(TRUE);
+    $this->parser->method('parse')->willReturn(
+      $this->createParsedPostback(NovaPayStatus::Created),
+    );
+    $payment = $this->createMock(PaymentInterface::class);
+    $payment_storage = $this->createMock(PaymentStorageInterface::class);
+    $payment_storage->method('loadByProperties')->willReturn([$payment]);
+    $this->entityTypeManager->method('getStorage')
+      ->with('commerce_payment')->willReturn($payment_storage);
+    $this->statusMapper->expects(self::once())->method('apply')
+      ->with($payment, NovaPayStatus::Created)->willReturn(FALSE);
+
+    $result = $this->processor->process(
+      $this->gateway,
+      $this->gatewayPlugin,
+      'stale-created-json',
+      'valid-signature',
+    );
+
+    self::assertSame(PostbackOutcome::Ignored, $result->getOutcome());
+  }
+
+  /**
    * Tests that an identical raw payload is acknowledged without entity access.
    */
   public function testDuplicatePayloadDoesNotChangePayment(): void {
@@ -416,12 +442,14 @@ final class PostbackProcessorTest extends TestCase {
   /**
    * Creates a normalized v1 event for processor tests.
    */
-  private function createParsedPostback(): ParsedPostback {
+  private function createParsedPostback(
+    NovaPayStatus $status = NovaPayStatus::Holded,
+  ): ParsedPostback {
     return new ParsedPostback(
       PostbackVersion::V1,
       NormalizedPostbackEvent::fromValues(
         'session-uuid',
-        'holded',
+        $status->value,
         [],
       ),
     );

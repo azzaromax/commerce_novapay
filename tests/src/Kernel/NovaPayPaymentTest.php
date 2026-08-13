@@ -407,6 +407,34 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
   }
 
   /**
+   * Tests that a stale created event cannot reactivate a failed payment.
+   */
+  public function testCreatedStatusDoesNotRecoverFailedPayment(): void {
+    $payment_storage = $this->container
+      ->get('entity_type.manager')
+      ->getStorage('commerce_payment');
+    $payment = $payment_storage->create([
+      'payment_gateway' => $this->paymentGateway,
+      'order_id' => $this->order->id(),
+      'amount' => new Price('30', 'USD'),
+      'state' => 'pending',
+      'remote_id' => 'failed-session-id',
+      'remote_state' => NovaPayStatus::Processing->value,
+    ]);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    $payment->save();
+
+    $mapper = new PaymentStatusMapper();
+    self::assertTrue($mapper->apply($payment, NovaPayStatus::Failed));
+    self::assertFalse($mapper->apply($payment, NovaPayStatus::Created));
+
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    self::assertSame('failed', $payment->getState()->getId());
+    self::assertSame(NovaPayStatus::Failed->value, $payment->getRemoteState());
+  }
+
+  /**
    * Tests partial quantities, postback confirmation, and cumulative limits.
    */
   public function testItemRefundLedgerWaitsForPostback(): void {

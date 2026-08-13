@@ -99,6 +99,23 @@ final class PaymentStatusMapperTest extends TestCase {
   }
 
   /**
+   * Tests that an initial status cannot reactivate a failed payment.
+   */
+  public function testCreatedCannotRecoverFailedPayment(): void {
+    $payment = $this->createMock(PaymentInterface::class);
+    $state = $this->createMock(StateItemInterface::class);
+    $state->method('getId')->willReturn('failed');
+    $payment->method('getState')->willReturn($state);
+    $state->expects(self::never())->method('applyTransitionById');
+    $payment->expects(self::never())->method('setRemoteState');
+    $payment->expects(self::never())->method('save');
+
+    self::assertFalse(
+      (new PaymentStatusMapper())->apply($payment, NovaPayStatus::Created),
+    );
+  }
+
+  /**
    * Tests that an older intermediate event cannot overwrite a final state.
    */
   public function testProcessingCannotRollBackCompletedPayment(): void {

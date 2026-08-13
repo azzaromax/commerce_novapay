@@ -174,7 +174,6 @@ final class PaymentStatusMapper implements PaymentStatusMapperInterface {
         default => NULL,
       },
       'failed' => match ($status) {
-        NovaPayStatus::Created,
         NovaPayStatus::Processing => 'retry',
         NovaPayStatus::Holded => 'retry_authorize',
         NovaPayStatus::Paid,
