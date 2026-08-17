@@ -13,12 +13,16 @@ use Drupal\commerce_novapay\Credential\NovaPayMode;
 use Drupal\commerce_novapay\Credential\RsaKeyValidatorInterface;
 use Drupal\commerce_novapay\Exception\InvalidRuntimeProfileException;
 use Drupal\commerce_novapay\Payment\AuthorizationOperationManagerInterface;
+use Drupal\commerce_novapay\Payment\PaymentStatusCheckManagerInterface;
+use Drupal\commerce_novapay\Payment\PaymentStatusCheckResult;
 use Drupal\commerce_novapay\Payment\RefundOperationManagerInterface;
 use Drupal\commerce_novapay\Payment\RefundStatusCheckResult;
 use Drupal\commerce_novapay\Payment\SupportsItemRefundsInterface;
+use Drupal\commerce_novapay\Payment\SupportsPaymentStatusChecksInterface;
 use Drupal\commerce_novapay\Phone\CustomerProfilePhoneInspectorInterface;
 use Drupal\commerce_novapay\PluginForm\NovaPayCaptureForm;
 use Drupal\commerce_novapay\PluginForm\NovaPayPaymentOffsiteForm;
+use Drupal\commerce_novapay\PluginForm\NovaPayPaymentStatusForm;
 use Drupal\commerce_novapay\PluginForm\NovaPayRefundForm;
 use Drupal\commerce_novapay\PluginForm\NovaPayRefundStatusForm;
 use Drupal\commerce_novapay\PluginForm\NovaPayVoidForm;
@@ -60,13 +64,14 @@ use Symfony\Component\HttpFoundation\Response;
     'capture-payment' => NovaPayCaptureForm::class,
     'refund-payment' => NovaPayRefundForm::class,
     'check-refund-status' => NovaPayRefundStatusForm::class,
+    'check-payment-status' => NovaPayPaymentStatusForm::class,
     'void-payment' => NovaPayVoidForm::class,
   ],
   payment_method_types: ['credit_card'],
   payment_type: 'novapay_payment',
   requires_billing_information: FALSE,
 )]
-final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigurationProviderInterface, SupportsAuthorizationsInterface, SupportsItemRefundsInterface, SupportsRefundsInterface {
+final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigurationProviderInterface, SupportsAuthorizationsInterface, SupportsItemRefundsInterface, SupportsPaymentStatusChecksInterface, SupportsRefundsInterface {
 
   private const MAX_KEY_BYTES = 65536;
 
@@ -109,6 +114,11 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
    * The serialized NovaPay capture/void operation manager.
    */
   private AuthorizationOperationManagerInterface $authorizationOperationManager;
+
+  /**
+   * The read-only NovaPay payment status reconciliation manager.
+   */
+  private PaymentStatusCheckManagerInterface $paymentStatusCheckManager;
 
   /**
    * The serialized NovaPay refund manager and confirmed item ledger.
@@ -160,6 +170,9 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
     );
     $instance->authorizationOperationManager = $container->get(
       'commerce_novapay.authorization_operation_manager',
+    );
+    $instance->paymentStatusCheckManager = $container->get(
+      'commerce_novapay.payment_status_check_manager',
     );
     $instance->refundOperationManager = $container->get(
       'commerce_novapay.refund_operation_manager',
@@ -617,6 +630,22 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
   }
 
   /**
+   * Returns whether the payment can be reconciled with a read-only status call.
+   */
+  public function canCheckPaymentStatus(PaymentInterface $payment): bool {
+    return $this->paymentStatusCheckManager->canCheckStatus($payment);
+  }
+
+  /**
+   * Reconciles a payment with NovaPay without submitting a financial command.
+   */
+  public function checkPaymentStatus(
+    PaymentInterface $payment,
+  ): PaymentStatusCheckResult {
+    return $this->paymentStatusCheckManager->checkStatus($payment, $this);
+  }
+
+  /**
    * {@inheritdoc}
    *
    * @return array<string, array<string, mixed>>
@@ -624,6 +653,12 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
    */
   public function buildPaymentOperations(PaymentInterface $payment): array {
     $operations = parent::buildPaymentOperations($payment);
+    $operations['check_payment_status'] = [
+      'title' => $this->t('Check NovaPay payment status'),
+      'page_title' => $this->t('Check NovaPay payment status'),
+      'plugin_form' => 'check-payment-status',
+      'access' => $this->canCheckPaymentStatus($payment),
+    ];
     $operations['check_refund_status'] = [
       'title' => $this->t('Check refund status'),
       'page_title' => $this->t('Check NovaPay refund status'),
@@ -676,6 +711,16 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
       'NovaPay postback for gateway @gateway: @outcome (@version, @status).',
       $context,
     );
+    if ($result->getDiagnostics() !== []) {
+      $diagnostic_context = [];
+      foreach ($result->getDiagnostics() as $name => $value) {
+        $diagnostic_context['@' . $name] = $value;
+      }
+      $this->logger->notice(
+        'NovaPay postback diagnostics for gateway @gateway: @reason (payment_state=@payment_state, remote_state=@remote_state, pending_operation=@pending_operation).',
+        $context + $diagnostic_context,
+      );
+    }
 
     return new Response('', match ($result->getOutcome()) {
       PostbackOutcome::InvalidSignature => Response::HTTP_FORBIDDEN,

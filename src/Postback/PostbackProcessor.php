@@ -51,6 +51,9 @@ final class PostbackProcessor implements PostbackProcessorInterface {
     string $signature,
   ): PostbackResult {
     $credentials = $gateway_plugin->getRuntimeConfiguration()->getCredentials();
+    $detailed_logging = $gateway_plugin->getRuntimeConfiguration()
+      ->getProfile()
+      ->isLoggingEnabled();
     $public_key = $credentials->getPublicKeyPem();
     $verified = $this->verifier->verify($raw_body, $signature, $public_key);
     if (
@@ -67,6 +70,7 @@ final class PostbackProcessor implements PostbackProcessorInterface {
       return PostbackResult::invalidSignature();
     }
 
+    $diagnostics = [];
     try {
       $parsed = $this->parser->parse($raw_body);
     }
@@ -89,7 +93,7 @@ final class PostbackProcessor implements PostbackProcessorInterface {
         $event->getSessionId(),
         (string) $gateway->id(),
         $event->getStatus(),
-        function () use ($gateway, $event, $event_key): PostbackOutcome {
+        function () use ($gateway, $event, $event_key, $detailed_logging, &$diagnostics): PostbackOutcome {
           $payment = $this->findPayment($gateway, $event);
           if ($payment === NULL) {
             return PostbackOutcome::UnknownPayment;
@@ -104,9 +108,14 @@ final class PostbackProcessor implements PostbackProcessorInterface {
             $payment,
             $event->getStatus(),
           );
-          return $status_applied || $pending_refund
-            ? PostbackOutcome::Applied
-            : PostbackOutcome::Ignored;
+          if ($status_applied || $pending_refund) {
+            return PostbackOutcome::Applied;
+          }
+
+          if ($detailed_logging) {
+            $diagnostics = $this->buildIgnoredDiagnostics($payment);
+          }
+          return PostbackOutcome::Ignored;
         },
       );
     }
@@ -118,7 +127,50 @@ final class PostbackProcessor implements PostbackProcessorInterface {
       $outcome ?? PostbackOutcome::Duplicate,
       $parsed->getVersion(),
       $event->getStatus(),
+      $diagnostics,
     );
+  }
+
+  /**
+   * Builds a fixed-value explanation for a non-mutating valid callback.
+   *
+   * This deliberately excludes session/order/payment identifiers, raw payload,
+   * signature and any customer or payment data.
+   *
+   * @return array<string, string>
+   *   Sanitized diagnostic context.
+   */
+  private function buildIgnoredDiagnostics(PaymentInterface $payment): array {
+    $state = $payment->getState()->getId();
+    $known_states = [
+      'pending',
+      'authorization',
+      'completed',
+      'partially_refunded',
+      'refunded',
+      'authorization_voided',
+      'expired',
+      'failed',
+    ];
+    $remote_state = $payment->getRemoteState();
+    $pending_operation = $payment->hasField('novapay_pending_operation')
+      ? $payment->get('novapay_pending_operation')->getString()
+      : '';
+    $pending_operation = PendingOperation::tryFrom($pending_operation);
+
+    return [
+      'reason' => 'no_permitted_payment_mutation',
+      'payment_state' => in_array($state, $known_states, TRUE)
+        ? $state
+        : 'other',
+      'remote_state' => is_string($remote_state)
+        && NovaPayStatus::tryFrom($remote_state) !== NULL
+        ? $remote_state
+        : 'none_or_other',
+      'pending_operation' => $pending_operation instanceof PendingOperation
+        ? $pending_operation->value
+        : 'none_or_other',
+    ];
   }
 
   /**

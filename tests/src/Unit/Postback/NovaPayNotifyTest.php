@@ -103,15 +103,48 @@ final class NovaPayNotifyTest extends TestCase {
   }
 
   /**
+   * Tests sanitized details are logged without postback identifiers or body.
+   */
+  public function testLogsSafeIgnoredPostbackDiagnostics(): void {
+    $processor = $this->createMock(PostbackProcessorInterface::class);
+    $processor->method('process')->willReturn(PostbackResult::forEvent(
+      PostbackOutcome::Ignored,
+      PostbackVersion::V1,
+      NovaPayStatus::Failed,
+      [
+        'reason' => 'no_permitted_payment_mutation',
+        'payment_state' => 'failed',
+        'remote_state' => 'failed',
+        'pending_operation' => 'none_or_other',
+      ],
+    ));
+    $logger = $this->createMock(LoggerInterface::class);
+    $logger->expects(self::exactly(2))->method('notice')
+      ->willReturnCallback(
+        static function (string $message, array $context): void {
+          self::assertStringNotContainsString('session', $message);
+          self::assertStringNotContainsString('raw-body', $message);
+          self::assertStringNotContainsString('signature', $message);
+          self::assertArrayNotHasKey('@session_id', $context);
+          self::assertSame('novapay_test', $context['@gateway']);
+        },
+      );
+    $plugin = $this->createPlugin($processor, $logger);
+
+    $plugin->onNotify(Request::create('/', 'POST', [], [], [], [], 'raw-body'));
+  }
+
+  /**
    * Creates a minimally wired gateway plugin for notification tests.
    */
   private function createPlugin(
     PostbackProcessorInterface $processor,
+    ?LoggerInterface $logger = NULL,
   ): NovaPay {
     $plugin = new NovaPay([], 'novapay', []);
     $gateway = $this->createMock(PaymentGatewayInterface::class);
     $gateway->method('id')->willReturn('novapay_test');
-    $logger = $this->createMock(LoggerInterface::class);
+    $logger ??= $this->createMock(LoggerInterface::class);
     $wire = \Closure::bind(
       function () use ($gateway, $processor, $logger): void {
         $this->parentEntity = $gateway;

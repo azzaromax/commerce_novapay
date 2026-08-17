@@ -11,11 +11,21 @@ final class PostbackResult {
 
   /**
    * Constructs a bounded postback result.
+   *
+   * @param \Drupal\commerce_novapay\Postback\PostbackOutcome $outcome
+   *   The processing outcome.
+   * @param \Drupal\commerce_novapay\Postback\PostbackVersion|null $version
+   *   The detected schema version.
+   * @param \Drupal\commerce_novapay\Postback\NovaPayStatus|null $status
+   *   The normalized NovaPay status.
+   * @param array<string, string> $diagnostics
+   *   Fixed-value diagnostic fields safe for logging.
    */
   private function __construct(
     private readonly PostbackOutcome $outcome,
     private readonly ?PostbackVersion $version = NULL,
     private readonly ?NovaPayStatus $status = NULL,
+    private readonly array $diagnostics = [],
   ) {}
 
   /**
@@ -34,13 +44,23 @@ final class PostbackResult {
 
   /**
    * Creates a result for a successfully normalized event.
+   *
+   * @param \Drupal\commerce_novapay\Postback\PostbackOutcome $outcome
+   *   The processing outcome.
+   * @param \Drupal\commerce_novapay\Postback\PostbackVersion $version
+   *   The detected schema version.
+   * @param \Drupal\commerce_novapay\Postback\NovaPayStatus $status
+   *   The normalized NovaPay status.
+   * @param array<string, string> $diagnostics
+   *   Fixed-value diagnostic fields safe for logging.
    */
   public static function forEvent(
     PostbackOutcome $outcome,
     PostbackVersion $version,
     NovaPayStatus $status,
+    array $diagnostics = [],
   ): self {
-    return new self($outcome, $version, $status);
+    return new self($outcome, $version, $status, $diagnostics);
   }
 
   /**
@@ -62,6 +82,16 @@ final class PostbackResult {
    */
   public function getStatus(): ?NovaPayStatus {
     return $this->status;
+  }
+
+  /**
+   * Gets optional bounded diagnostics for sanitized detailed logging.
+   *
+   * @return array<string, string>
+   *   Fixed-value diagnostic fields only; no request identifiers or payload.
+   */
+  public function getDiagnostics(): array {
+    return $this->diagnostics;
   }
 
 }

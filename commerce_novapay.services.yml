@@ -53,6 +53,17 @@ services:
   Drupal\commerce_novapay\Payment\AuthorizationOperationManagerInterface:
     alias: commerce_novapay.authorization_operation_manager
 
+  commerce_novapay.payment_status_check_manager:
+    class: Drupal\commerce_novapay\Payment\PaymentStatusCheckManager
+    arguments:
+      - '@entity_type.manager'
+      - '@commerce_novapay.api_client'
+      - '@commerce_novapay.postback.status_mapper'
+      - '@lock'
+
+  Drupal\commerce_novapay\Payment\PaymentStatusCheckManagerInterface:
+    alias: commerce_novapay.payment_status_check_manager
+
   commerce_novapay.refund_ledger:
     class: Drupal\commerce_novapay\Payment\RefundLedgerRepository
     arguments:

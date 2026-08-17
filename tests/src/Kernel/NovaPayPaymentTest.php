@@ -22,6 +22,8 @@ use Drupal\commerce_novapay\Exception\ApiTransportException;
 use Drupal\commerce_novapay\Exception\ApiUnexpectedResponseException;
 use Drupal\commerce_novapay\Exception\ApiValidationException;
 use Drupal\commerce_novapay\Payment\AuthorizationOperationManager;
+use Drupal\commerce_novapay\Payment\PaymentStatusCheckManager;
+use Drupal\commerce_novapay\Payment\PaymentStatusCheckResult;
 use Drupal\commerce_novapay\Payment\RefundOperationManager;
 use Drupal\commerce_novapay\Payment\RefundStatusCheckResult;
 use Drupal\commerce_novapay\Payment\SessionLockName;
@@ -38,6 +40,7 @@ use Drupal\commerce_novapay\Postback\PaymentStatusMapper;
 use Drupal\commerce_novapay\Postback\PaymentStatusMapperInterface;
 use Drupal\commerce_novapay\Phone\OrderPhoneResolverInterface;
 use Drupal\commerce_novapay\PluginForm\NovaPayPaymentOffsiteForm;
+use Drupal\commerce_novapay\PluginForm\NovaPayPaymentStatusForm;
 use Drupal\commerce_novapay\PluginForm\NovaPayRefundForm;
 use Drupal\commerce_novapay\PluginForm\NovaPayRefundStatusForm;
 use Drupal\commerce_novapay\PluginForm\NovaPayVoidForm;
@@ -177,6 +180,12 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
       NovaPayRefundStatusForm::class,
       $this->paymentGateway->getPlugin()->getFormClass(
         'check-refund-status',
+      ),
+    );
+    self::assertSame(
+      NovaPayPaymentStatusForm::class,
+      $this->paymentGateway->getPlugin()->getFormClass(
+        'check-payment-status',
       ),
     );
 
@@ -1332,6 +1341,76 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
   }
 
   /**
+   * Tests direct and hold payment reconciliation without a postback.
+   */
+  public function testReconcilesPaymentStatusWithoutFinancialRequest(): void {
+    $direct = $this->createPendingPayment('direct-status-session');
+    $direct_client = $this->createMock(NovaPayApiClientInterface::class);
+    $direct_client->expects(self::once())->method('getStatus')
+      ->willReturn(SessionStatusResponse::fromArray([
+        'id' => 'direct-status-session',
+        'status' => 'paid',
+      ]));
+    $direct_manager = $this->createPaymentStatusCheckManager($direct_client);
+
+    self::assertSame(
+      PaymentStatusCheckResult::Reconciled,
+      $direct_manager->checkStatus($direct, $this->createRuntimeProvider()),
+    );
+    $direct = $this->reloadEntity($direct);
+    self::assertInstanceOf(PaymentInterface::class, $direct);
+    self::assertSame('completed', $direct->getState()->getId());
+    self::assertSame('paid', $direct->getRemoteState());
+
+    $hold = $this->createAuthorizationPayment('hold-status-session');
+    $hold->set('novapay_pending_operation', 'capture');
+    $hold->set('novapay_pending_amount', '30');
+    $hold->save();
+    $hold_client = $this->createMock(NovaPayApiClientInterface::class);
+    $hold_client->expects(self::once())->method('getStatus')
+      ->willReturn(SessionStatusResponse::fromArray([
+        'id' => 'hold-status-session',
+        'status' => 'hold_confirmed',
+      ]));
+    $hold_manager = $this->createPaymentStatusCheckManager($hold_client);
+
+    self::assertSame(
+      PaymentStatusCheckResult::Reconciled,
+      $hold_manager->checkStatus($hold, $this->createRuntimeProvider()),
+    );
+    $hold = $this->reloadEntity($hold);
+    self::assertInstanceOf(PaymentInterface::class, $hold);
+    self::assertSame('completed', $hold->getState()->getId());
+    self::assertTrue($hold->get('novapay_pending_operation')->isEmpty());
+  }
+
+  /**
+   * Tests that inconclusive and mismatching results cannot mutate a payment.
+   */
+  public function testPaymentStatusCheckPreservesPendingState(): void {
+    $payment = $this->createAuthorizationPayment('pending-status-session');
+    $payment->set('novapay_pending_operation', 'void');
+    $payment->save();
+    $api_client = $this->createMock(NovaPayApiClientInterface::class);
+    $api_client->expects(self::once())->method('getStatus')
+      ->willReturn(SessionStatusResponse::fromArray([
+        'id' => 'pending-status-session',
+        'status' => 'processing_void',
+      ]));
+    $manager = $this->createPaymentStatusCheckManager($api_client);
+
+    self::assertSame(
+      PaymentStatusCheckResult::Reconciled,
+      $manager->checkStatus($payment, $this->createRuntimeProvider()),
+    );
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    self::assertSame('authorization', $payment->getState()->getId());
+    self::assertSame('void', $payment->get('novapay_pending_operation')->getString());
+    self::assertSame('processing_void', $payment->getRemoteState());
+  }
+
+  /**
    * Creates a persisted NovaPay authorization for operation tests.
    */
   private function createAuthorizationPayment(
@@ -1348,6 +1427,26 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
       'remote_id' => $session_id,
       'remote_state' => 'holded',
       'novapay_operation_id' => 'operation-id',
+    ]);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    $payment->save();
+    return $payment;
+  }
+
+  /**
+   * Creates a persisted pending NovaPay payment for direct status checks.
+   */
+  private function createPendingPayment(string $session_id): PaymentInterface {
+    $payment_storage = $this->container
+      ->get('entity_type.manager')
+      ->getStorage('commerce_payment');
+    $payment = $payment_storage->create([
+      'payment_gateway' => $this->paymentGateway,
+      'order_id' => $this->order->id(),
+      'amount' => new Price('30', 'USD'),
+      'state' => 'pending',
+      'remote_id' => $session_id,
+      'remote_state' => 'created',
     ]);
     self::assertInstanceOf(PaymentInterface::class, $payment);
     $payment->save();
@@ -1439,6 +1538,20 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
       $this->container->get('entity_type.manager'),
       $api_client,
       $lock ?? $this->container->get('lock'),
+    );
+  }
+
+  /**
+   * Creates a status manager with a mocked read-only API boundary.
+   */
+  private function createPaymentStatusCheckManager(
+    NovaPayApiClientInterface $api_client,
+  ): PaymentStatusCheckManager {
+    return new PaymentStatusCheckManager(
+      $this->container->get('entity_type.manager'),
+      $api_client,
+      $this->container->get('commerce_novapay.postback.status_mapper'),
+      $this->container->get('lock'),
     );
   }
 
