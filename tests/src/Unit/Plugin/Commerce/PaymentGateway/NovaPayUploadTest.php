@@ -315,6 +315,34 @@ final class NovaPayUploadTest extends TestCase {
   }
 
   /**
+   * Tests the per-gateway checkout logo setting and persistence.
+   */
+  public function testDisplayLogoConfiguration(): void {
+    $storage = $this->createMock(RuntimeProfileStorageInterface::class);
+    $storage->method('load')->willReturn(NULL);
+    $storage->method('hasValidLiveKeys')->willReturn(FALSE);
+    $storage->expects(self::once())->method('save');
+    $plugin = $this->createConfigurationPlugin($storage);
+    $form = $plugin->buildConfigurationForm(
+      ['#parents' => ['configuration', 'novapay']],
+      $this->createConfigurationFormState(),
+    );
+
+    self::assertTrue($plugin->defaultConfiguration()['display_logo']);
+    self::assertSame('checkbox', $form['display_logo']['#type']);
+    self::assertTrue($form['display_logo']['#default_value']);
+    self::assertStringContainsString(
+      'instead of the payment method name',
+      (string) $form['display_logo']['#title'],
+    );
+
+    $state = $this->createConfigurationFormState('10', FALSE);
+    $plugin->submitConfigurationForm($form, $state);
+
+    self::assertFalse($plugin->getConfiguration()['display_logo']);
+  }
+
+  /**
    * Creates a plugin with phone readiness and string translation dependencies.
    */
   private function createPhoneValidationPlugin(
@@ -401,6 +429,7 @@ final class NovaPayUploadTest extends TestCase {
    */
   private function createConfigurationFormState(
     ?string $timeout = NULL,
+    bool $display_logo = TRUE,
   ): FormState {
     $state = new FormState();
     $gateway = $this->createMock(PaymentGatewayInterface::class);
@@ -414,6 +443,7 @@ final class NovaPayUploadTest extends TestCase {
         ['configuration', 'novapay'],
         [
           'display_label' => 'NovaPay',
+          'display_logo' => $display_logo,
           'mode' => 'n/a',
           'payment_method_types' => [],
           'collect_billing_information' => FALSE,

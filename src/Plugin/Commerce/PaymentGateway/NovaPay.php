@@ -76,6 +76,18 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
   private const MAX_KEY_BYTES = 65536;
 
   /**
+   * {@inheritdoc}
+   *
+   * @return array<string, mixed>
+   *   The default payment gateway configuration.
+   */
+  public function defaultConfiguration() {
+    return [
+      'display_logo' => TRUE,
+    ] + parent::defaultConfiguration();
+  }
+
+  /**
    * The environment-local runtime profile storage.
    */
   private RuntimeProfileStorageInterface $runtimeProfileStorage;
@@ -197,6 +209,16 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
     FormStateInterface $form_state,
   ) {
     $form = parent::buildConfigurationForm($form, $form_state);
+    $form['display_logo'] = [
+      '#type' => 'checkbox',
+      '#title' => $this->t(
+        'Display the NovaPay logo instead of the payment method name',
+      ),
+      '#description' => $this->t(
+        'When disabled, checkout displays the configured display name.',
+      ),
+      '#default_value' => $this->configuration['display_logo'] ?? TRUE,
+    ];
     $profile = NULL;
     $profile_error = FALSE;
     $has_live_keys = NULL;
@@ -522,6 +544,12 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
     parent::submitConfigurationForm($form, $form_state);
     if ($form_state->getErrors()) {
       return;
+    }
+
+    $configuration_values = $form_state->getValue($form['#parents']);
+    if (is_array($configuration_values)) {
+      $this->configuration['display_logo'] =
+        !empty($configuration_values['display_logo']);
     }
 
     $values = $this->getRuntimeValues($form, $form_state);

@@ -24,7 +24,7 @@ final class PaymentOptionBranding {
    *
    * @var array<string, bool>
    */
-  private array $novaPayGateways = [];
+  private array $logoGateways = [];
 
   /**
    * Constructs the payment option branding service.
@@ -139,7 +139,7 @@ final class PaymentOptionBranding {
     foreach ($element['#payment_options'] as $payment_option) {
       if (
         !$payment_option instanceof PaymentOption
-        || !$this->isNovaPayGateway($payment_option->getPaymentGatewayId())
+        || !$this->shouldDisplayLogo($payment_option->getPaymentGatewayId())
       ) {
         continue;
       }
@@ -176,21 +176,31 @@ final class PaymentOptionBranding {
   }
 
   /**
-   * Checks whether a gateway entity uses the NovaPay plugin.
+   * Checks whether a NovaPay gateway is configured to display its logo.
    */
-  private function isNovaPayGateway(string $gateway_id): bool {
-    if (array_key_exists($gateway_id, $this->novaPayGateways)) {
-      return $this->novaPayGateways[$gateway_id];
+  private function shouldDisplayLogo(string $gateway_id): bool {
+    if (array_key_exists($gateway_id, $this->logoGateways)) {
+      return $this->logoGateways[$gateway_id];
     }
 
     $gateway = $this->entityTypeManager
       ->getStorage('commerce_payment_gateway')
       ->load($gateway_id);
-    $is_novapay = $gateway instanceof PaymentGatewayInterface
-      && $gateway->getPluginId() === self::GATEWAY_PLUGIN_ID;
-    $this->novaPayGateways[$gateway_id] = $is_novapay;
+    if (
+      !$gateway instanceof PaymentGatewayInterface
+      || $gateway->getPluginId() !== self::GATEWAY_PLUGIN_ID
+    ) {
+      $this->logoGateways[$gateway_id] = FALSE;
 
-    return $is_novapay;
+      return FALSE;
+    }
+
+    $configuration = $gateway->getPluginConfiguration();
+    $display_logo = !array_key_exists('display_logo', $configuration)
+      || (bool) $configuration['display_logo'];
+    $this->logoGateways[$gateway_id] = $display_logo;
+
+    return $display_logo;
   }
 
   /**

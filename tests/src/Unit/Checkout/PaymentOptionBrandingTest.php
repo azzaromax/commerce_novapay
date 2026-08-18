@@ -28,11 +28,12 @@ final class PaymentOptionBrandingTest extends TestCase {
    */
   public function testMarksOnlyNovaPayPaymentOptions(): void {
     $storage = $this->createMock(EntityStorageInterface::class);
-    $storage->expects(self::exactly(3))
+    $storage->expects(self::exactly(4))
       ->method('load')
       ->willReturnMap([
         ['novapay_primary', $this->createGateway('novapay')],
         ['novapay_secondary', $this->createGateway('novapay')],
+        ['novapay_text', $this->createGateway('novapay', FALSE)],
         ['manual_gateway', $this->createGateway('manual')],
       ]);
     $entity_type_manager = $this->createMock(EntityTypeManagerInterface::class);
@@ -60,6 +61,11 @@ final class PaymentOptionBrandingTest extends TestCase {
               'label' => 'Manual',
               'payment_gateway_id' => 'manual_gateway',
             ]),
+            'novapay_text' => new PaymentOption([
+              'id' => 'novapay_text',
+              'label' => 'NovaPay text label',
+              'payment_gateway_id' => 'novapay_text',
+            ]),
           ],
           'payment_method' => [
             '#type' => 'radios',
@@ -69,6 +75,7 @@ final class PaymentOptionBrandingTest extends TestCase {
               ],
             ],
             'novapay_secondary' => [],
+            'novapay_text' => [],
             'manual_gateway' => [],
           ],
         ],
@@ -105,6 +112,7 @@ final class PaymentOptionBrandingTest extends TestCase {
       ],
       $payment_method['novapay_secondary']['#commerce_novapay_logo'],
     );
+    self::assertSame([], $payment_method['novapay_text']);
     self::assertSame([], $payment_method['manual_gateway']);
   }
 
@@ -198,9 +206,16 @@ final class PaymentOptionBrandingTest extends TestCase {
   /**
    * Creates a payment gateway mock.
    */
-  private function createGateway(string $plugin_id): PaymentGatewayInterface {
+  private function createGateway(
+    string $plugin_id,
+    ?bool $display_logo = NULL,
+  ): PaymentGatewayInterface {
     $gateway = $this->createMock(PaymentGatewayInterface::class);
     $gateway->method('getPluginId')->willReturn($plugin_id);
+    $configuration = $display_logo === NULL
+      ? []
+      : ['display_logo' => $display_logo];
+    $gateway->method('getPluginConfiguration')->willReturn($configuration);
 
     return $gateway;
   }
