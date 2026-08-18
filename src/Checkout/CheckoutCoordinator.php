@@ -114,6 +114,7 @@ final class CheckoutCoordinator implements CheckoutCoordinatorInterface {
         $plugin->getNotifyUrl()->toString(),
         $return_url,
         $cancel_url,
+        $runtime_configuration->getProfile()->getSuccessRedirectTimeout(),
       );
       $stage = 'create_session';
       $session = $this->api_client->createSession(

@@ -8,6 +8,7 @@ use Drupal\commerce_novapay\Api\Dto\Request\AddPaymentRequest;
 use Drupal\commerce_novapay\Api\Dto\Request\CreateSessionRequest;
 use Drupal\commerce_novapay\Exception\OrderPayloadException;
 use Drupal\commerce_novapay\Phone\OrderPhoneResolverInterface;
+use Drupal\commerce_novapay\Runtime\RuntimeProfile;
 use Drupal\commerce_novapay\Runtime\TransactionMode;
 use Drupal\commerce_order\Entity\OrderInterface;
 use Drupal\commerce_payment\Entity\PaymentGatewayInterface;
@@ -38,6 +39,7 @@ final class OrderPayloadBuilder implements OrderPayloadBuilderInterface {
     string $callback_url,
     string $success_url,
     string $fail_url,
+    int $success_redirect_timeout = RuntimeProfile::DEFAULT_SUCCESS_REDIRECT_TIMEOUT,
   ): CreateSessionRequest {
     $this->getPayableBalance($order);
     $order_id = $this->getOrderId($order);
@@ -70,6 +72,9 @@ final class OrderPayloadBuilder implements OrderPayloadBuilderInterface {
       callback_url: $callback_url,
       success_url: $success_url,
       fail_url: $fail_url,
+      success_redirect_timeout: $success_redirect_timeout === 0
+        ? NULL
+        : $success_redirect_timeout,
     );
   }
 

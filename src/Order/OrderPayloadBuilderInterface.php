@@ -6,6 +6,7 @@ namespace Drupal\commerce_novapay\Order;
 
 use Drupal\commerce_novapay\Api\Dto\Request\AddPaymentRequest;
 use Drupal\commerce_novapay\Api\Dto\Request\CreateSessionRequest;
+use Drupal\commerce_novapay\Runtime\RuntimeProfile;
 use Drupal\commerce_novapay\Runtime\TransactionMode;
 use Drupal\commerce_order\Entity\OrderInterface;
 use Drupal\commerce_payment\Entity\PaymentGatewayInterface;
@@ -24,6 +25,7 @@ interface OrderPayloadBuilderInterface {
     string $callback_url,
     string $success_url,
     string $fail_url,
+    int $success_redirect_timeout = RuntimeProfile::DEFAULT_SUCCESS_REDIRECT_TIMEOUT,
   ): CreateSessionRequest;
 
   /**

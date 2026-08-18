@@ -207,6 +207,7 @@ final class CheckoutCoordinatorTest extends TestCase {
         'https://merchant.example/novapay/notify',
         'https://merchant.example/return',
         'https://merchant.example/cancel',
+        RuntimeProfile::DEFAULT_SUCCESS_REDIRECT_TIMEOUT,
       )
       ->willReturn($session_request);
     $this->apiClient->expects(self::once())

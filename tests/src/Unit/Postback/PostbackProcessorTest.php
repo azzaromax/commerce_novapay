@@ -270,7 +270,7 @@ final class PostbackProcessorTest extends TestCase {
     );
 
     self::assertSame(PostbackOutcome::UnknownPayment, $result->getOutcome());
-    self::assertSame(PostbackVersion::V1, $result->getVersion());
+    self::assertSame(PostbackVersion::V2, $result->getVersion());
     self::assertSame(NovaPayStatus::Holded, $result->getStatus());
   }
 
@@ -440,13 +440,13 @@ final class PostbackProcessorTest extends TestCase {
   }
 
   /**
-   * Creates a normalized v1 event for processor tests.
+   * Creates a normalized v2 event for processor tests.
    */
   private function createParsedPostback(
     NovaPayStatus $status = NovaPayStatus::Holded,
   ): ParsedPostback {
     return new ParsedPostback(
-      PostbackVersion::V1,
+      PostbackVersion::V2,
       NormalizedPostbackEvent::fromValues(
         'session-uuid',
         $status->value,

@@ -14,6 +14,13 @@ final class RuntimeProfile {
 
   public const VERSION = 1;
 
+  public const DEFAULT_SUCCESS_REDIRECT_TIMEOUT = 5;
+
+  /**
+   * Maximum value accepted by NovaPay's documented int32 field.
+   */
+  public const MAX_SUCCESS_REDIRECT_TIMEOUT = 2147483647;
+
   /**
    * Constructs a validated runtime profile.
    */
@@ -23,8 +30,16 @@ final class RuntimeProfile {
     private readonly TransactionMode $transaction_mode,
     private readonly string $recipient_identifier,
     private readonly bool $logging_enabled,
+    private readonly int $success_redirect_timeout = self::DEFAULT_SUCCESS_REDIRECT_TIMEOUT,
   ) {
     if (strlen($this->recipient_identifier) > 128) {
+      throw InvalidRuntimeProfileException::invalidProfile();
+    }
+
+    if (
+      $this->success_redirect_timeout < 0
+      || $this->success_redirect_timeout > self::MAX_SUCCESS_REDIRECT_TIMEOUT
+    ) {
       throw InvalidRuntimeProfileException::invalidProfile();
     }
 
@@ -60,6 +75,8 @@ final class RuntimeProfile {
     $merchant_id = $values['merchant_id'] ?? NULL;
     $recipient_identifier = $values['recipient_identifier'] ?? NULL;
     $logging_enabled = $values['logging_enabled'] ?? NULL;
+    $success_redirect_timeout = $values['success_redirect_timeout']
+      ?? self::DEFAULT_SUCCESS_REDIRECT_TIMEOUT;
 
     if (
       $mode === NULL
@@ -67,6 +84,7 @@ final class RuntimeProfile {
       || (!is_string($merchant_id) && $merchant_id !== NULL)
       || !is_string($recipient_identifier)
       || !is_bool($logging_enabled)
+      || !is_int($success_redirect_timeout)
     ) {
       throw InvalidRuntimeProfileException::invalidProfile();
     }
@@ -77,6 +95,7 @@ final class RuntimeProfile {
       $transaction_mode,
       trim($recipient_identifier),
       $logging_enabled,
+      $success_redirect_timeout,
     );
   }
 
@@ -118,6 +137,13 @@ final class RuntimeProfile {
   }
 
   /**
+   * Gets the success-page delay, or zero when the API field must be omitted.
+   */
+  public function getSuccessRedirectTimeout(): int {
+    return $this->success_redirect_timeout;
+  }
+
+  /**
    * Converts the profile to its environment-local JSON representation.
    *
    * @return array<string, bool|int|string>
@@ -130,6 +156,7 @@ final class RuntimeProfile {
       'transaction_mode' => $this->transaction_mode->value,
       'recipient_identifier' => $this->getRecipientIdentifier(),
       'logging_enabled' => $this->logging_enabled,
+      'success_redirect_timeout' => $this->success_redirect_timeout,
     ];
 
     if ($this->mode === NovaPayMode::Live) {

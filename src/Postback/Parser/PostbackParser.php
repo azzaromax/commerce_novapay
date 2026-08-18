@@ -9,14 +9,13 @@ use Drupal\commerce_novapay\Postback\Dto\ParsedPostback;
 use Drupal\commerce_novapay\Postback\PostbackVersion;
 
 /**
- * Decodes verified raw JSON and detects acquiring postback v1 or v2.
+ * Decodes the verified raw JSON for the current acquiring postback v2 schema.
  */
 final class PostbackParser implements PostbackParserInterface {
 
   private const MAX_BODY_BYTES = 1048576;
 
   public function __construct(
-    private readonly V1PostbackParser $v1_parser,
     private readonly V2PostbackParser $v2_parser,
   ) {}
 
@@ -41,20 +40,14 @@ final class PostbackParser implements PostbackParserInterface {
       throw InvalidPostbackException::unsupportedSchema();
     }
 
-    if ($this->v2_parser->supports($payload)) {
-      return new ParsedPostback(
-        PostbackVersion::V2,
-        $this->v2_parser->parse($payload),
-      );
-    }
-    if ($this->v1_parser->supports($payload)) {
-      return new ParsedPostback(
-        PostbackVersion::V1,
-        $this->v1_parser->parse($payload),
-      );
+    if (!$this->v2_parser->supports($payload)) {
+      throw InvalidPostbackException::unsupportedSchema();
     }
 
-    throw InvalidPostbackException::unsupportedSchema();
+    return new ParsedPostback(
+      PostbackVersion::V2,
+      $this->v2_parser->parse($payload),
+    );
   }
 
 }

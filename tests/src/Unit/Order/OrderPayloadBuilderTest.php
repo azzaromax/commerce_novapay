@@ -66,6 +66,7 @@ final class OrderPayloadBuilderTest extends TestCase {
       'https://merchant.example/payment/notify/novapay_test',
       'https://merchant.example/checkout/return',
       'https://merchant.example/checkout/cancel',
+      12,
     );
 
     self::assertSame(
@@ -86,7 +87,27 @@ final class OrderPayloadBuilderTest extends TestCase {
         'callback_url' => 'https://merchant.example/payment/notify/novapay_test',
         'success_url' => 'https://merchant.example/checkout/return',
         'fail_url' => 'https://merchant.example/checkout/cancel',
+        'success_redirect_timeout' => 12,
       ],
+      $request->toArray(),
+    );
+  }
+
+  /**
+   * Tests that zero leaves NovaPay's redirect-timeout behavior unspecified.
+   */
+  public function testOmitsZeroSuccessRedirectTimeout(): void {
+    $request = $this->builder->buildSessionRequest(
+      $this->createOrder(new Price('1250.00', 'UAH')),
+      $this->createGateway(),
+      'https://merchant.example/payment/notify/novapay_test',
+      'https://merchant.example/checkout/return',
+      'https://merchant.example/checkout/cancel',
+      0,
+    );
+
+    self::assertArrayNotHasKey(
+      'success_redirect_timeout',
       $request->toArray(),
     );
   }

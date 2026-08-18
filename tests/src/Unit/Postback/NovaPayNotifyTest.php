@@ -79,7 +79,7 @@ final class NovaPayNotifyTest extends TestCase {
     yield 'applied' => [
       PostbackResult::forEvent(
         PostbackOutcome::Applied,
-        PostbackVersion::V1,
+        PostbackVersion::V2,
         NovaPayStatus::Paid,
       ),
       Response::HTTP_OK,
@@ -87,7 +87,7 @@ final class NovaPayNotifyTest extends TestCase {
     yield 'duplicate' => [
       PostbackResult::forEvent(
         PostbackOutcome::Duplicate,
-        PostbackVersion::V1,
+        PostbackVersion::V2,
         NovaPayStatus::Paid,
       ),
       Response::HTTP_OK,
@@ -95,7 +95,7 @@ final class NovaPayNotifyTest extends TestCase {
     yield 'ignored' => [
       PostbackResult::forEvent(
         PostbackOutcome::Ignored,
-        PostbackVersion::V1,
+        PostbackVersion::V2,
         NovaPayStatus::Processing,
       ),
       Response::HTTP_OK,
@@ -109,7 +109,7 @@ final class NovaPayNotifyTest extends TestCase {
     $processor = $this->createMock(PostbackProcessorInterface::class);
     $processor->method('process')->willReturn(PostbackResult::forEvent(
       PostbackOutcome::Ignored,
-      PostbackVersion::V1,
+      PostbackVersion::V2,
       NovaPayStatus::Failed,
       [
         'reason' => 'no_permitted_payment_mutation',

@@ -315,6 +315,19 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
       '#default_value' => $profile?->getRecipientIdentifier() ?? '',
       '#maxlength' => 128,
     ];
+    $form['runtime_settings']['success_redirect_timeout'] = [
+      '#type' => 'number',
+      '#title' => $this->t('Success redirect delay'),
+      '#description' => $this->t(
+        'Seconds NovaPay displays its success page before automatically returning the customer to checkout. Use 0 to omit the automatic redirect timeout. Changes apply only to newly created NovaPay sessions.',
+      ),
+      '#default_value' => $profile?->getSuccessRedirectTimeout()
+        ?? RuntimeProfile::DEFAULT_SUCCESS_REDIRECT_TIMEOUT,
+      '#min' => 0,
+      '#max' => RuntimeProfile::MAX_SUCCESS_REDIRECT_TIMEOUT,
+      '#step' => 1,
+      '#required' => TRUE,
+    ];
     $form['runtime_settings']['logging_enabled'] = [
       '#type' => 'checkbox',
       '#title' => $this->t('Enable detailed logging'),
@@ -409,6 +422,23 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
       $form_state->setError(
         $form['runtime_settings']['transaction_mode'],
         $this->t('Select a valid transaction mode.'),
+      );
+    }
+
+    $success_redirect_timeout = filter_var(
+      $values['success_redirect_timeout'] ?? NULL,
+      FILTER_VALIDATE_INT,
+    );
+    if (
+      $success_redirect_timeout === FALSE
+      || $success_redirect_timeout < 0
+      || $success_redirect_timeout > RuntimeProfile::MAX_SUCCESS_REDIRECT_TIMEOUT
+    ) {
+      $form_state->setError(
+        $form['runtime_settings']['success_redirect_timeout'],
+        $this->t('Enter a success redirect delay from 0 to @maximum seconds.', [
+          '@maximum' => RuntimeProfile::MAX_SUCCESS_REDIRECT_TIMEOUT,
+        ]),
       );
     }
 
@@ -508,6 +538,7 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
       TransactionMode::from((string) $values['transaction_mode']),
       trim((string) ($values['recipient_identifier'] ?? '')),
       !empty($values['logging_enabled']),
+      (int) $values['success_redirect_timeout'],
     );
 
     $private_key = NULL;

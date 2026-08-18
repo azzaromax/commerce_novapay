@@ -4,12 +4,16 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\commerce_novapay\Unit\Plugin\Commerce\PaymentGateway;
 
+use Drupal\Core\Entity\EntityFormInterface;
 use Drupal\Core\Form\FormState;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\Core\StringTranslation\TranslationInterface;
 use Drupal\commerce_novapay\Phone\CustomerProfilePhoneInspectorInterface;
 use Drupal\commerce_novapay\Phone\CustomerProfilePhoneReadiness;
 use Drupal\commerce_novapay\Plugin\Commerce\PaymentGateway\NovaPay;
+use Drupal\commerce_novapay\Runtime\RuntimeProfile;
+use Drupal\commerce_novapay\Runtime\RuntimeProfileStorageInterface;
+use Drupal\commerce_payment\Entity\PaymentGatewayInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -236,6 +240,81 @@ final class NovaPayUploadTest extends TestCase {
   }
 
   /**
+   * Tests redirect-timeout form defaults, validation, and persistence.
+   */
+  public function testSuccessRedirectTimeoutConfiguration(): void {
+    $storage = $this->createMock(RuntimeProfileStorageInterface::class);
+    $storage->method('load')->willReturn(NULL);
+    $storage->method('hasValidLiveKeys')->willReturn(FALSE);
+    $storage->expects(self::exactly(2))->method('assertWritable')
+      ->with('gateway-uuid');
+    $storage->expects(self::once())->method('save')
+      ->with(
+        'gateway-uuid',
+        self::callback(static fn (RuntimeProfile $profile): bool =>
+          $profile->getSuccessRedirectTimeout() === 0),
+        NULL,
+        NULL,
+      );
+    $plugin = $this->createConfigurationPlugin($storage);
+    $form = $plugin->buildConfigurationForm(
+      ['#parents' => ['configuration', 'novapay']],
+      $this->createConfigurationFormState(),
+    );
+    $form['runtime_settings']['#parents'] = [
+      'configuration',
+      'novapay',
+      'runtime_settings',
+    ];
+    $form['runtime_settings']['runtime_mode']['#parents'] = [
+      'configuration',
+      'novapay',
+      'runtime_settings',
+      'runtime_mode',
+    ];
+    $form['runtime_settings']['transaction_mode']['#parents'] = [
+      'configuration',
+      'novapay',
+      'runtime_settings',
+      'transaction_mode',
+    ];
+    $form['runtime_settings']['success_redirect_timeout']['#parents'] = [
+      'configuration',
+      'novapay',
+      'runtime_settings',
+      'success_redirect_timeout',
+    ];
+    $element = $form['runtime_settings']['success_redirect_timeout'];
+
+    self::assertSame(
+      RuntimeProfile::DEFAULT_SUCCESS_REDIRECT_TIMEOUT,
+      $element['#default_value'],
+    );
+    self::assertSame(0, $element['#min']);
+    self::assertSame(
+      RuntimeProfile::MAX_SUCCESS_REDIRECT_TIMEOUT,
+      $element['#max'],
+    );
+    self::assertStringContainsString(
+      'Use 0 to omit',
+      (string) $element['#description'],
+    );
+    self::assertStringContainsString(
+      'newly created NovaPay sessions',
+      (string) $element['#description'],
+    );
+
+    $invalid_state = $this->createConfigurationFormState('1.5');
+    $plugin->validateConfigurationForm($form, $invalid_state);
+    self::assertNotSame([], $invalid_state->getErrors());
+
+    $valid_state = $this->createConfigurationFormState('0');
+    $plugin->validateConfigurationForm($form, $valid_state);
+    self::assertSame([], $valid_state->getErrors());
+    $plugin->submitConfigurationForm($form, $valid_state);
+  }
+
+  /**
    * Creates a plugin with phone readiness and string translation dependencies.
    */
   private function createPhoneValidationPlugin(
@@ -260,6 +339,97 @@ final class NovaPayUploadTest extends TestCase {
     $plugin->setStringTranslation($string_translation);
 
     return $plugin;
+  }
+
+  /**
+   * Creates a fully wired plugin for configuration-form unit coverage.
+   */
+  private function createConfigurationPlugin(
+    RuntimeProfileStorageInterface $storage,
+  ): NovaPay {
+    $plugin = new NovaPay(
+      [
+        'display_label' => 'NovaPay',
+        'mode' => 'n/a',
+        'payment_method_types' => [],
+        'collect_billing_information' => FALSE,
+      ],
+      'novapay',
+      [
+        'display_label' => 'NovaPay',
+        'modes' => ['n/a' => 'Environment-local'],
+        'requires_billing_information' => FALSE,
+        'libraries' => [],
+      ],
+    );
+    $string_translation = $this->createMock(TranslationInterface::class);
+    $string_translation->method('translateString')
+      ->willReturnCallback(
+        static fn (TranslatableMarkup $markup): string =>
+          $markup->getUntranslatedString(),
+      );
+    $plugin->setStringTranslation($string_translation);
+
+    $gateway = $this->createMock(PaymentGatewayInterface::class);
+    $gateway->method('uuid')->willReturn('gateway-uuid');
+    $gateway->method('id')->willReturn(NULL);
+    $parent_entity = new \ReflectionProperty($plugin, 'parentEntity');
+    $parent_entity->setValue($plugin, $gateway);
+
+    $storage_property = new \ReflectionProperty(
+      $plugin,
+      'runtimeProfileStorage',
+    );
+    $storage_property->setValue($plugin, $storage);
+    $inspector = $this->createMock(
+      CustomerProfilePhoneInspectorInterface::class,
+    );
+    $inspector->method('inspect')->willReturn(
+      new CustomerProfilePhoneReadiness([], []),
+    );
+    $inspector_property = new \ReflectionProperty(
+      $plugin,
+      'customerProfilePhoneInspector',
+    );
+    $inspector_property->setValue($plugin, $inspector);
+
+    return $plugin;
+  }
+
+  /**
+   * Creates submitted test-mode configuration values.
+   */
+  private function createConfigurationFormState(
+    ?string $timeout = NULL,
+  ): FormState {
+    $state = new FormState();
+    $gateway = $this->createMock(PaymentGatewayInterface::class);
+    $gateway->method('uuid')->willReturn('gateway-uuid');
+    $gateway->method('id')->willReturn(NULL);
+    $form_object = $this->createMock(EntityFormInterface::class);
+    $form_object->method('getEntity')->willReturn($gateway);
+    $state->setFormObject($form_object);
+    if ($timeout !== NULL) {
+      $state->setValue(
+        ['configuration', 'novapay'],
+        [
+          'display_label' => 'NovaPay',
+          'mode' => 'n/a',
+          'payment_method_types' => [],
+          'collect_billing_information' => FALSE,
+          'runtime_settings' => [
+            'runtime_mode' => 'test',
+            'transaction_mode' => 'direct',
+            'recipient_identifier' => '',
+            'success_redirect_timeout' => $timeout,
+            'logging_enabled' => FALSE,
+            'live_credentials' => ['merchant_id' => ''],
+          ],
+        ],
+      );
+    }
+
+    return $state;
   }
 
 }

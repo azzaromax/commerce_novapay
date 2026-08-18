@@ -35,7 +35,7 @@ final class V2PostbackParser implements PostbackVersionParserInterface {
         !is_array($payment)
         || !array_key_exists('external_id', $payment)
         || !array_key_exists('amount', $payment)
-        || !V1PostbackParser::isAmount($payment['amount'])
+        || !self::isAmount($payment['amount'])
       ) {
         throw InvalidPostbackException::unsupportedSchema();
       }
@@ -51,6 +51,15 @@ final class V2PostbackParser implements PostbackVersionParserInterface {
       $external_ids,
       $refunded_amounts,
     );
+  }
+
+  /**
+   * Checks a documented JSON number or decimal-string amount shape.
+   */
+  private static function isAmount(mixed $amount): bool {
+    return (is_int($amount) || is_float($amount)) && $amount >= 0
+      || is_string($amount)
+      && preg_match('/^[0-9]+(?:\.[0-9]+)?$/D', $amount) === 1;
   }
 
 }

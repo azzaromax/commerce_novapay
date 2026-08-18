@@ -16,6 +16,7 @@ use Drupal\commerce_novapay\Runtime\RuntimeProfile;
 use Drupal\commerce_novapay\Runtime\RuntimeProfileStorage;
 use Drupal\commerce_novapay\Runtime\TransactionMode;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -119,6 +120,80 @@ final class RuntimeProfileStorageTest extends TestCase {
       0600,
       fileperms($this->gatewayDirectory . '/settings.json') & 0777,
     );
+  }
+
+  /**
+   * Tests that the automatic success return delay is persisted locally.
+   */
+  public function testSavesConfiguredSuccessRedirectTimeout(): void {
+    $profile = new RuntimeProfile(
+      NovaPayMode::Test,
+      NULL,
+      TransactionMode::Direct,
+      '',
+      FALSE,
+      12,
+    );
+    $this->storage->save(self::GATEWAY_UUID, $profile);
+
+    $loaded = $this->storage->load(self::GATEWAY_UUID);
+    self::assertInstanceOf(RuntimeProfile::class, $loaded);
+    self::assertSame(12, $loaded->getSuccessRedirectTimeout());
+  }
+
+  /**
+   * Tests the documented int32 boundary and zero omission sentinel.
+   */
+  public function testAcceptsSuccessRedirectTimeoutBoundaries(): void {
+    $disabled = new RuntimeProfile(
+      NovaPayMode::Test,
+      NULL,
+      TransactionMode::Direct,
+      '',
+      FALSE,
+      0,
+    );
+    $maximum = new RuntimeProfile(
+      NovaPayMode::Test,
+      NULL,
+      TransactionMode::Direct,
+      '',
+      FALSE,
+      RuntimeProfile::MAX_SUCCESS_REDIRECT_TIMEOUT,
+    );
+
+    self::assertSame(0, $disabled->getSuccessRedirectTimeout());
+    self::assertSame(
+      RuntimeProfile::MAX_SUCCESS_REDIRECT_TIMEOUT,
+      $maximum->getSuccessRedirectTimeout(),
+    );
+  }
+
+  /**
+   * Tests rejection of redirect timeouts outside NovaPay's int32 shape.
+   */
+  #[DataProvider('invalidSuccessRedirectTimeoutProvider')]
+  public function testRejectsInvalidSuccessRedirectTimeout(int $timeout): void {
+    $this->expectException(InvalidRuntimeProfileException::class);
+    new RuntimeProfile(
+      NovaPayMode::Test,
+      NULL,
+      TransactionMode::Direct,
+      '',
+      FALSE,
+      $timeout,
+    );
+  }
+
+  /**
+   * Provides redirect timeouts outside the supported int32 range.
+   *
+   * @return iterable<string, array{int}>
+   *   Invalid timeout values.
+   */
+  public static function invalidSuccessRedirectTimeoutProvider(): iterable {
+    yield 'negative' => [-1];
+    yield 'larger than int32' => [2147483648];
   }
 
   /**
