@@ -121,6 +121,16 @@ services:
   Drupal\commerce_novapay\Checkout\CheckoutCoordinatorInterface:
     alias: commerce_novapay.checkout_coordinator
 
+  commerce_novapay.checkout_payment_option_branding:
+    class: Drupal\commerce_novapay\Checkout\PaymentOptionBranding
+    arguments:
+      - '@entity_type.manager'
+      - '@extension.list.module'
+      - '@request_stack'
+
+  Drupal\commerce_novapay\Checkout\PaymentOptionBranding:
+    alias: commerce_novapay.checkout_payment_option_branding
+
   commerce_novapay.postback.v1_parser:
     class: Drupal\commerce_novapay\Postback\Parser\V1PostbackParser
 
