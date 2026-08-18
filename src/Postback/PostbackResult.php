@@ -20,26 +20,35 @@ final class PostbackResult {
    *   The normalized NovaPay status.
    * @param array<string, string> $diagnostics
    *   Fixed-value diagnostic fields safe for logging.
+   * @param bool $detailed_logging
+   *   Whether sanitized informational logging is enabled for this gateway.
    */
   private function __construct(
     private readonly PostbackOutcome $outcome,
     private readonly ?PostbackVersion $version = NULL,
     private readonly ?NovaPayStatus $status = NULL,
     private readonly array $diagnostics = [],
+    private readonly bool $detailed_logging = FALSE,
   ) {}
 
   /**
    * Creates an invalid-signature result without parsed payload details.
    */
-  public static function invalidSignature(): self {
-    return new self(PostbackOutcome::InvalidSignature);
+  public static function invalidSignature(bool $detailed_logging = FALSE): self {
+    return new self(
+      PostbackOutcome::InvalidSignature,
+      detailed_logging: $detailed_logging,
+    );
   }
 
   /**
    * Creates an invalid-payload result without retaining the raw body.
    */
-  public static function invalidPayload(): self {
-    return new self(PostbackOutcome::InvalidPayload);
+  public static function invalidPayload(bool $detailed_logging = FALSE): self {
+    return new self(
+      PostbackOutcome::InvalidPayload,
+      detailed_logging: $detailed_logging,
+    );
   }
 
   /**
@@ -53,14 +62,23 @@ final class PostbackResult {
    *   The normalized NovaPay status.
    * @param array<string, string> $diagnostics
    *   Fixed-value diagnostic fields safe for logging.
+   * @param bool $detailed_logging
+   *   Whether sanitized informational logging is enabled for this gateway.
    */
   public static function forEvent(
     PostbackOutcome $outcome,
     PostbackVersion $version,
     NovaPayStatus $status,
     array $diagnostics = [],
+    bool $detailed_logging = FALSE,
   ): self {
-    return new self($outcome, $version, $status, $diagnostics);
+    return new self(
+      $outcome,
+      $version,
+      $status,
+      $diagnostics,
+      $detailed_logging,
+    );
   }
 
   /**
@@ -92,6 +110,13 @@ final class PostbackResult {
    */
   public function getDiagnostics(): array {
     return $this->diagnostics;
+  }
+
+  /**
+   * Returns whether sanitized informational logging is enabled.
+   */
+  public function isDetailedLoggingEnabled(): bool {
+    return $this->detailed_logging;
   }
 
 }

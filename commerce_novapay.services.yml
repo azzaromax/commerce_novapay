@@ -4,6 +4,21 @@ services:
     arguments:
       - 'commerce_novapay'
 
+  commerce_novapay.log_sanitizer:
+    class: Drupal\commerce_novapay\Logging\LogSanitizer
+
+  Drupal\commerce_novapay\Logging\LogSanitizerInterface:
+    alias: commerce_novapay.log_sanitizer
+
+  commerce_novapay.logger:
+    class: Drupal\commerce_novapay\Logging\NovaPayLogger
+    arguments:
+      - '@logger.channel.commerce_novapay'
+      - '@commerce_novapay.log_sanitizer'
+
+  Drupal\commerce_novapay\Logging\NovaPayLoggerInterface:
+    alias: commerce_novapay.logger
+
   commerce_novapay.rsa_key_validator:
     class: Drupal\commerce_novapay\Credential\RsaKeyValidator
 
@@ -39,6 +54,7 @@ services:
     arguments:
       - '@http_client'
       - '@commerce_novapay.signer'
+      - '@commerce_novapay.logger'
 
   Drupal\commerce_novapay\Api\NovaPayApiClientInterface:
     alias: commerce_novapay.api_client

@@ -21,11 +21,13 @@ use Drupal\commerce_novapay\Exception\ApiRequestException;
 use Drupal\commerce_novapay\Exception\ApiTransportException;
 use Drupal\commerce_novapay\Exception\ApiUnexpectedResponseException;
 use Drupal\commerce_novapay\Exception\ApiValidationException;
+use Drupal\commerce_novapay\Logging\NovaPayLoggerInterface;
 use Drupal\commerce_novapay\Runtime\RuntimeConfiguration;
 use Drupal\commerce_novapay\Runtime\RuntimeConfigurationProviderInterface;
 use Drupal\commerce_novapay\Signature\SignerInterface;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
+use GuzzleHttp\Psr7\Utils;
 use Psr\Http\Message\ResponseInterface;
 
 /**
@@ -49,6 +51,7 @@ final class NovaPayApiClient implements NovaPayApiClientInterface {
   public function __construct(
     private readonly ClientInterface $http_client,
     private readonly SignerInterface $signer,
+    private readonly NovaPayLoggerInterface $logger,
   ) {}
 
   /**
@@ -152,13 +155,40 @@ final class NovaPayApiClient implements NovaPayApiClientInterface {
     NovaPayRequestInterface $request,
   ): ResponseInterface {
     $credentials = $configuration->getCredentials();
-    $body = $this->encodeBody(
-      ['merchant_id' => $credentials->getMerchantId()] + $request->toArray(),
+    $payload = ['merchant_id' => $credentials->getMerchantId()]
+      + $request->toArray();
+    try {
+      $body = $this->encodeBody($payload);
+    }
+    catch (ApiRequestException $exception) {
+      $this->logger->logError('api_request_rejected', [
+        'endpoint' => $path,
+        'source' => $exception::class,
+      ]);
+      throw $exception;
+    }
+    $detailed_logging = $configuration->getProfile()->isLoggingEnabled();
+    $this->logger->logDetailed(
+      $detailed_logging,
+      'api_request',
+      [
+        'endpoint' => $path,
+        'payload' => $payload,
+      ],
     );
-    $signature = $this->signer->sign(
-      $body,
-      $credentials->getPrivateKeyPem(),
-    );
+    try {
+      $signature = $this->signer->sign(
+        $body,
+        $credentials->getPrivateKeyPem(),
+      );
+    }
+    catch (\Throwable $exception) {
+      $this->logger->logError('api_signing_error', [
+        'endpoint' => $path,
+        'source' => $exception::class,
+      ]);
+      throw $exception;
+    }
 
     try {
       $response = $this->http_client->request(
@@ -179,12 +209,42 @@ final class NovaPayApiClient implements NovaPayApiClientInterface {
         ],
       );
     }
-    catch (GuzzleException) {
+    catch (GuzzleException $exception) {
+      $this->logger->logError('api_transport_error', [
+        'endpoint' => $path,
+        'source' => $exception::class,
+      ]);
       // Do not retain a request exception: it may contain signed request data.
       throw ApiTransportException::requestFailed();
     }
 
+    try {
+      $response_body = $this->readResponseBody($response);
+    }
+    catch (ApiUnexpectedResponseException $exception) {
+      $this->logger->logError('api_response_rejected', [
+        'endpoint' => $path,
+        'http_status' => $response->getStatusCode(),
+        'source' => $exception::class,
+      ]);
+      throw $exception;
+    }
+    $this->logger->logDetailedJson(
+      $detailed_logging,
+      'api_response',
+      $response_body,
+      [
+        'endpoint' => $path,
+        'http_status' => $response->getStatusCode(),
+      ],
+    );
+    $response = $response->withBody(Utils::streamFor($response_body));
+
     if ($response->getStatusCode() < 200 || $response->getStatusCode() >= 300) {
+      $this->logger->logError('api_http_error', [
+        'endpoint' => $path,
+        'http_status' => $response->getStatusCode(),
+      ]);
       $this->throwApiError($response, $path);
     }
 

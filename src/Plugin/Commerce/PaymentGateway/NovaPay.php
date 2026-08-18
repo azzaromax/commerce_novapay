@@ -12,6 +12,7 @@ use Drupal\commerce_novapay\Credential\CredentialResolverInterface;
 use Drupal\commerce_novapay\Credential\NovaPayMode;
 use Drupal\commerce_novapay\Credential\RsaKeyValidatorInterface;
 use Drupal\commerce_novapay\Exception\InvalidRuntimeProfileException;
+use Drupal\commerce_novapay\Logging\NovaPayLoggerInterface;
 use Drupal\commerce_novapay\Payment\AuthorizationOperationManagerInterface;
 use Drupal\commerce_novapay\Payment\PaymentStatusCheckManagerInterface;
 use Drupal\commerce_novapay\Payment\PaymentStatusCheckResult;
@@ -42,7 +43,6 @@ use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\SupportsAuthorization
 use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\SupportsRefundsInterface;
 use Drupal\commerce_price\Price;
 use Drupal\commerce_order\Entity\OrderInterface;
-use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Request;
@@ -108,7 +108,7 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
   /**
    * The sanitized NovaPay logger channel.
    */
-  private LoggerInterface $logger;
+  private NovaPayLoggerInterface $logger;
 
   /**
    * The serialized NovaPay capture/void operation manager.
@@ -166,7 +166,7 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
       'commerce_novapay.postback.processor',
     );
     $instance->logger = $container->get(
-      'logger.channel.commerce_novapay',
+      'commerce_novapay.logger',
     );
     $instance->authorizationOperationManager = $container->get(
       'commerce_novapay.authorization_operation_manager',
@@ -711,46 +711,62 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
    */
   public function onNotify(Request $request): Response {
     $gateway = $this->parentEntity;
+    $raw_body = $request->getContent();
     try {
       $result = $this->postbackProcessor->process(
         $gateway,
         $this,
-        $request->getContent(),
+        $raw_body,
         (string) $request->headers->get('x-sign', ''),
       );
     }
     catch (\Throwable $exception) {
-      $this->logger->error(
-        'NovaPay postback processing failed for gateway @gateway: @source.',
-        [
-          '@gateway' => (string) $gateway->id(),
-          '@source' => $exception::class,
-        ],
-      );
+      $this->logger->logError('postback_processing_failed', [
+        'gateway' => (string) $gateway->id(),
+        'source' => $exception::class,
+      ]);
       return new Response('', Response::HTTP_INTERNAL_SERVER_ERROR);
     }
 
     $version = $result->getVersion();
     $status = $result->getStatus();
     $context = [
-      '@gateway' => (string) $gateway->id(),
-      '@outcome' => $result->getOutcome()->value,
-      '@version' => $version === NULL ? 'unknown' : $version->value,
-      '@status' => $status === NULL ? 'unknown' : $status->value,
+      'gateway' => (string) $gateway->id(),
+      'outcome' => $result->getOutcome()->value,
+      'version' => $version === NULL ? 'unknown' : $version->value,
+      'status' => $status === NULL ? 'unknown' : $status->value,
+      'diagnostics' => $result->getDiagnostics(),
     ];
-    $this->logger->notice(
-      'NovaPay postback for gateway @gateway: @outcome (@version, @status).',
-      $context,
-    );
-    if ($result->getDiagnostics() !== []) {
-      $diagnostic_context = [];
-      foreach ($result->getDiagnostics() as $name => $value) {
-        $diagnostic_context['@' . $name] = $value;
-      }
-      $this->logger->notice(
-        'NovaPay postback diagnostics for gateway @gateway: @reason (payment_state=@payment_state, remote_state=@remote_state, pending_operation=@pending_operation).',
-        $context + $diagnostic_context,
+    if ($result->getOutcome() === PostbackOutcome::InvalidSignature) {
+      $this->logger->logDetailed(
+        $result->isDetailedLoggingEnabled(),
+        'postback',
+        $context + [
+          'payload_bytes' => strlen($raw_body),
+          'payload_sha256' => hash('sha256', $raw_body),
+        ],
       );
+    }
+    else {
+      $this->logger->logDetailedJson(
+        $result->isDetailedLoggingEnabled(),
+        'postback',
+        $raw_body,
+        $context,
+      );
+    }
+    if (in_array(
+      $result->getOutcome(),
+      [
+        PostbackOutcome::InvalidSignature,
+        PostbackOutcome::InvalidPayload,
+      ],
+      TRUE,
+    )) {
+      $this->logger->logError('postback_rejected', [
+        'gateway' => $context['gateway'],
+        'outcome' => $context['outcome'],
+      ]);
     }
 
     return new Response('', match ($result->getOutcome()) {

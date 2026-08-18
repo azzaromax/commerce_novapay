@@ -67,7 +67,7 @@ final class PostbackProcessor implements PostbackProcessorInterface {
       );
     }
     if (!$verified) {
-      return PostbackResult::invalidSignature();
+      return PostbackResult::invalidSignature($detailed_logging);
     }
 
     $diagnostics = [];
@@ -75,13 +75,13 @@ final class PostbackProcessor implements PostbackProcessorInterface {
       $parsed = $this->parser->parse($raw_body);
     }
     catch (InvalidPostbackException) {
-      return PostbackResult::invalidPayload();
+      return PostbackResult::invalidPayload($detailed_logging);
     }
     if (
       $parsed->getVersion() === PostbackVersion::V1
       && $credentials->getMode() !== NovaPayMode::Test
     ) {
-      return PostbackResult::invalidPayload();
+      return PostbackResult::invalidPayload($detailed_logging);
     }
     $event = $parsed->getEvent();
     $lock_name = SessionLockName::fromSessionId($event->getSessionId());
@@ -134,6 +134,7 @@ final class PostbackProcessor implements PostbackProcessorInterface {
       $parsed->getVersion(),
       $event->getStatus(),
       $diagnostics,
+      $detailed_logging,
     );
   }
 

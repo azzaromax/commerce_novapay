@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\commerce_novapay\Unit\Postback;
 
 use Drupal\commerce_novapay\Plugin\Commerce\PaymentGateway\NovaPay;
+use Drupal\commerce_novapay\Logging\NovaPayLoggerInterface;
 use Drupal\commerce_novapay\Postback\NovaPayStatus;
 use Drupal\commerce_novapay\Postback\PostbackOutcome;
 use Drupal\commerce_novapay\Postback\PostbackProcessorInterface;
@@ -15,7 +16,6 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
-use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -103,7 +103,7 @@ final class NovaPayNotifyTest extends TestCase {
   }
 
   /**
-   * Tests sanitized details are logged without postback identifiers or body.
+   * Tests postback data is delegated only to the sanitizer-enforcing logger.
    */
   public function testLogsSafeIgnoredPostbackDiagnostics(): void {
     $processor = $this->createMock(PostbackProcessorInterface::class);
@@ -117,17 +117,22 @@ final class NovaPayNotifyTest extends TestCase {
         'remote_state' => 'failed',
         'pending_operation' => 'none_or_other',
       ],
+      TRUE,
     ));
-    $logger = $this->createMock(LoggerInterface::class);
-    $logger->expects(self::exactly(2))->method('notice')
-      ->willReturnCallback(
-        static function (string $message, array $context): void {
-          self::assertStringNotContainsString('session', $message);
-          self::assertStringNotContainsString('raw-body', $message);
-          self::assertStringNotContainsString('signature', $message);
-          self::assertArrayNotHasKey('@session_id', $context);
-          self::assertSame('novapay_test', $context['@gateway']);
-        },
+    $logger = $this->createMock(NovaPayLoggerInterface::class);
+    $logger->expects(self::once())->method('logDetailedJson')
+      ->with(
+        TRUE,
+        'postback',
+        'raw-body',
+        self::callback(static function (array $context): bool {
+          return $context['gateway'] === 'novapay_test'
+            && $context['outcome'] === 'ignored'
+            && $context['version'] === 'v2'
+            && $context['status'] === 'failed'
+            && $context['diagnostics']['reason']
+              === 'no_permitted_payment_mutation';
+        }),
       );
     $plugin = $this->createPlugin($processor, $logger);
 
@@ -135,16 +140,64 @@ final class NovaPayNotifyTest extends TestCase {
   }
 
   /**
+   * Tests rejected callbacks always log metadata but never the raw payload.
+   */
+  public function testAlwaysLogsRejectedPostbackWithoutPayload(): void {
+    $processor = $this->createMock(PostbackProcessorInterface::class);
+    $processor->method('process')->willReturn(
+      PostbackResult::invalidSignature(TRUE),
+    );
+    $logger = $this->createMock(NovaPayLoggerInterface::class);
+    $logger->expects(self::never())->method('logDetailedJson');
+    $logger->expects(self::once())->method('logDetailed')
+      ->with(
+        TRUE,
+        'postback',
+        self::callback(static function (array $context): bool {
+          return $context['gateway'] === 'novapay_test'
+            && $context['outcome'] === 'invalid_signature'
+            && $context['payload_bytes'] === 32
+            && $context['payload_sha256'] === hash(
+              'sha256',
+              '{"client_phone":"+380501234567"}',
+            )
+            && !array_key_exists('payload', $context);
+        }),
+      );
+    $logger->expects(self::once())->method('logError')
+      ->with('postback_rejected', [
+        'gateway' => 'novapay_test',
+        'outcome' => 'invalid_signature',
+      ]);
+    $plugin = $this->createPlugin($processor, $logger);
+
+    $request = Request::create(
+      '/',
+      'POST',
+      [],
+      [],
+      [],
+      [],
+      '{"client_phone":"+380501234567"}',
+    );
+    $request->headers->set('x-sign', 'raw-signature');
+
+    $response = $plugin->onNotify($request);
+
+    self::assertSame(Response::HTTP_FORBIDDEN, $response->getStatusCode());
+  }
+
+  /**
    * Creates a minimally wired gateway plugin for notification tests.
    */
   private function createPlugin(
     PostbackProcessorInterface $processor,
-    ?LoggerInterface $logger = NULL,
+    ?NovaPayLoggerInterface $logger = NULL,
   ): NovaPay {
     $plugin = new NovaPay([], 'novapay', []);
     $gateway = $this->createMock(PaymentGatewayInterface::class);
     $gateway->method('id')->willReturn('novapay_test');
-    $logger ??= $this->createMock(LoggerInterface::class);
+    $logger ??= $this->createMock(NovaPayLoggerInterface::class);
     $wire = \Closure::bind(
       function () use ($gateway, $processor, $logger): void {
         $this->parentEntity = $gateway;

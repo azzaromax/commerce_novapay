@@ -19,6 +19,7 @@ use Drupal\commerce_novapay\Exception\ApiTransportException;
 use Drupal\commerce_novapay\Exception\ApiUnexpectedResponseException;
 use Drupal\commerce_novapay\Exception\ApiValidationException;
 use Drupal\commerce_novapay\Exception\NovaPayApiException;
+use Drupal\commerce_novapay\Logging\NovaPayLoggerInterface;
 use Drupal\commerce_novapay\Runtime\RuntimeConfiguration;
 use Drupal\commerce_novapay\Runtime\RuntimeConfigurationProviderInterface;
 use Drupal\commerce_novapay\Runtime\RuntimeProfile;
@@ -90,6 +91,48 @@ final class NovaPayApiClientTest extends TestCase {
     self::assertSame(15.0, $transaction['options']['timeout']);
     self::assertFalse($transaction['options']['allow_redirects']);
     self::assertFalse($transaction['options']['http_errors']);
+  }
+
+  /**
+   * Tests that enabled API diagnostics are delegated without signatures.
+   */
+  public function testLogsRequestAndResponseOnlyWhenEnabled(): void {
+    $history = new \ArrayObject();
+    $logger = $this->createMock(NovaPayLoggerInterface::class);
+    $logger->expects(self::once())->method('logDetailed')
+      ->with(
+        TRUE,
+        'api_request',
+        self::callback(static function (array $context): bool {
+          return $context['endpoint'] === '/v1/session'
+            && $context['payload']['client_phone'] === '+380501234567'
+            && !array_key_exists('x-sign', $context)
+            && !array_key_exists('signature', $context);
+        }),
+      );
+    $logger->expects(self::once())->method('logDetailedJson')
+      ->with(
+        TRUE,
+        'api_response',
+        '{"id":"session-123","pan":"4134171111111001"}',
+        [
+          'endpoint' => '/v1/session',
+          'http_status' => 200,
+        ],
+      );
+    $client = $this->createClient(
+      [new Response(200, [], '{"id":"session-123","pan":"4134171111111001"}')],
+      $history,
+      $this->createRecordingSigner(),
+      $logger,
+    );
+
+    $response = $client->createSession(
+      $this->createGateway(NovaPayMode::Test, TRUE),
+      new CreateSessionRequest('+380501234567'),
+    );
+
+    self::assertSame('session-123', $response->getSessionId());
   }
 
   /**
@@ -519,16 +562,24 @@ final class NovaPayApiClientTest extends TestCase {
    *   Captured request transactions.
    * @param \Drupal\commerce_novapay\Signature\SignerInterface $signer
    *   Request signer used by the client.
+   * @param \Drupal\commerce_novapay\Logging\NovaPayLoggerInterface|null $logger
+   *   Optional safe logger test double.
    */
   private function createClient(
     array $queue,
     \ArrayObject $history,
     SignerInterface $signer,
+    ?NovaPayLoggerInterface $logger = NULL,
   ): NovaPayApiClient {
     $stack = HandlerStack::create(new MockHandler($queue));
     $stack->push(Middleware::history($history));
 
-    return new NovaPayApiClient(new Client(['handler' => $stack]), $signer);
+    $logger ??= $this->createMock(NovaPayLoggerInterface::class);
+    return new NovaPayApiClient(
+      new Client(['handler' => $stack]),
+      $signer,
+      $logger,
+    );
   }
 
   /**
@@ -543,13 +594,14 @@ final class NovaPayApiClientTest extends TestCase {
    */
   private function createGateway(
     NovaPayMode $mode,
+    bool $logging_enabled = FALSE,
   ): RuntimeConfigurationProviderInterface {
     $profile = new RuntimeProfile(
       $mode,
       $mode === NovaPayMode::Live ? 'merchant-live' : NULL,
       TransactionMode::Direct,
       '',
-      FALSE,
+      $logging_enabled,
     );
     $credentials = new Credentials(
       $mode,

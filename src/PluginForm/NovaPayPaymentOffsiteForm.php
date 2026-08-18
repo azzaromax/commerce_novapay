@@ -8,10 +8,10 @@ use Drupal\Core\DependencyInjection\ContainerInjectionInterface;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\commerce_novapay\Checkout\CheckoutCoordinatorInterface;
 use Drupal\commerce_novapay\Exception\CheckoutPreparationException;
+use Drupal\commerce_novapay\Logging\NovaPayLoggerInterface;
 use Drupal\commerce_payment\Entity\PaymentInterface;
 use Drupal\commerce_payment\Exception\PaymentGatewayException;
 use Drupal\commerce_payment\PluginForm\PaymentOffsiteForm;
-use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
@@ -24,7 +24,7 @@ final class NovaPayPaymentOffsiteForm extends PaymentOffsiteForm implements Cont
    */
   public function __construct(
     private readonly CheckoutCoordinatorInterface $checkout_coordinator,
-    private readonly LoggerInterface $logger,
+    private readonly NovaPayLoggerInterface $logger,
   ) {}
 
   /**
@@ -33,7 +33,7 @@ final class NovaPayPaymentOffsiteForm extends PaymentOffsiteForm implements Cont
   public static function create(ContainerInterface $container): self {
     return new self(
       $container->get('commerce_novapay.checkout_coordinator'),
-      $container->get('logger.channel.commerce_novapay'),
+      $container->get('commerce_novapay.logger'),
     );
   }
 
@@ -74,17 +74,13 @@ final class NovaPayPaymentOffsiteForm extends PaymentOffsiteForm implements Cont
           'offsite_form',
           $exception,
         );
-      $context = [
-        '@order_id' => (string) ($payment->getOrderId() ?? 'unknown'),
-        '@stage' => $diagnostics->getStage(),
-        '@source' => $diagnostics->getSourceClass(),
-        '@http_status' => (string) ($diagnostics->getHttpStatus() ?? 'none'),
-        '@api_detail' => $diagnostics->getApiDetail() ?? 'none',
-      ];
-      $this->logger->error(
-        'NovaPay checkout preparation failed for order @order_id at @stage: @source (HTTP @http_status, API @api_detail).',
-        $context,
-      );
+      $this->logger->logError('checkout_preparation_failed', [
+        'order_id' => (string) ($payment->getOrderId() ?? 'unknown'),
+        'stage' => $diagnostics->getStage(),
+        'source' => $diagnostics->getSourceClass(),
+        'http_status' => $diagnostics->getHttpStatus(),
+        'api_detail' => $diagnostics->getApiDetail(),
+      ]);
       throw PaymentGatewayException::createForPayment(
         $payment,
         (string) $this->t(

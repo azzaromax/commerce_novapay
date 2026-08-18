@@ -13,13 +13,13 @@ use Drupal\commerce\Response\NeedsRedirectException;
 use Drupal\commerce_novapay\Checkout\CheckoutCoordinatorInterface;
 use Drupal\commerce_novapay\Exception\ApiTransportException;
 use Drupal\commerce_novapay\Exception\CheckoutPreparationException;
+use Drupal\commerce_novapay\Logging\NovaPayLoggerInterface;
 use Drupal\commerce_novapay\PluginForm\NovaPayPaymentOffsiteForm;
 use Drupal\commerce_payment\Entity\PaymentInterface;
 use Drupal\commerce_payment\Exception\PaymentGatewayException;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
-use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 
 /**
@@ -93,16 +93,16 @@ final class NovaPayPaymentOffsiteFormTest extends TestCase {
         ApiTransportException::requestFailed(),
       ),
     );
-    $logger = $this->createMock(LoggerInterface::class);
-    $logger->expects(self::once())->method('error')
+    $logger = $this->createMock(NovaPayLoggerInterface::class);
+    $logger->expects(self::once())->method('logError')
       ->with(
-        self::stringContains('NovaPay checkout preparation failed'),
+        'checkout_preparation_failed',
         self::callback(static function (array $context): bool {
-          return $context['@order_id'] === '10'
-            && $context['@stage'] === 'create_session'
-            && $context['@source'] === ApiTransportException::class
-            && $context['@http_status'] === 'none'
-            && $context['@api_detail'] === 'none';
+          return $context['order_id'] === '10'
+            && $context['stage'] === 'create_session'
+            && $context['source'] === ApiTransportException::class
+            && $context['http_status'] === NULL
+            && $context['api_detail'] === NULL;
         }),
       );
     $form = $this->createForm($coordinator, $payment, $logger);
@@ -127,9 +127,9 @@ final class NovaPayPaymentOffsiteFormTest extends TestCase {
   private function createForm(
     CheckoutCoordinatorInterface $coordinator,
     PaymentInterface $payment,
-    ?LoggerInterface $logger = NULL,
+    ?NovaPayLoggerInterface $logger = NULL,
   ): NovaPayPaymentOffsiteForm {
-    $logger ??= $this->createMock(LoggerInterface::class);
+    $logger ??= $this->createMock(NovaPayLoggerInterface::class);
     $form = new NovaPayPaymentOffsiteForm($coordinator, $logger);
     $form->setEntity($payment);
     $translation = $this->createMock(TranslationInterface::class);
