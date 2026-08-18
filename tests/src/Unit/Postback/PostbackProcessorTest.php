@@ -228,6 +228,68 @@ final class PostbackProcessorTest extends TestCase {
   }
 
   /**
+   * Tests that a signed v1 payload is unavailable outside sandbox mode.
+   */
+  public function testLiveModeRejectsV1Payload(): void {
+    $live_gateway_plugin = $this->createMock(
+      RuntimeConfigurationProviderInterface::class,
+    );
+    $live_gateway_plugin->method('getRuntimeConfiguration')->willReturn(
+      $this->createRuntimeConfiguration(NovaPayMode::Live),
+    );
+    $this->verifier->expects(self::once())->method('verify')->willReturn(TRUE);
+    $this->sandboxLegacyVerifier->expects(self::never())->method('verify');
+    $this->parser->expects(self::once())->method('parse')->willReturn(
+      $this->createParsedPostback(
+        NovaPayStatus::Paid,
+        PostbackVersion::V1,
+      ),
+    );
+    $this->entityTypeManager->expects(self::never())->method('getStorage');
+    $this->eventRepository->expects(self::never())->method('processOnce');
+
+    $result = $this->processor->process(
+      $this->gateway,
+      $live_gateway_plugin,
+      'signed-v1-live-json',
+      'valid-signature',
+    );
+
+    self::assertSame(PostbackOutcome::InvalidPayload, $result->getOutcome());
+  }
+
+  /**
+   * Tests that the documented public sandbox v1 shape remains processable.
+   */
+  public function testTestModeAcceptsV1Payload(): void {
+    $this->verifier->expects(self::once())->method('verify')->willReturn(TRUE);
+    $this->parser->expects(self::once())->method('parse')->willReturn(
+      $this->createParsedPostback(
+        NovaPayStatus::Paid,
+        PostbackVersion::V1,
+      ),
+    );
+    $payment = $this->createMock(PaymentInterface::class);
+    $payment_storage = $this->createMock(PaymentStorageInterface::class);
+    $payment_storage->method('loadByProperties')->willReturn([$payment]);
+    $this->entityTypeManager->method('getStorage')
+      ->with('commerce_payment')->willReturn($payment_storage);
+    $this->statusMapper->expects(self::once())->method('apply')
+      ->with($payment, NovaPayStatus::Paid)->willReturn(TRUE);
+
+    $result = $this->processor->process(
+      $this->gateway,
+      $this->gatewayPlugin,
+      'signed-v1-sandbox-json',
+      'valid-signature',
+    );
+
+    self::assertSame(PostbackOutcome::Applied, $result->getOutcome());
+    self::assertSame(PostbackVersion::V1, $result->getVersion());
+    self::assertSame(NovaPayStatus::Paid, $result->getStatus());
+  }
+
+  /**
    * Tests that unsupported verified JSON is reported without entity access.
    */
   public function testUnsupportedSchemaDoesNotLoadEntities(): void {
@@ -440,13 +502,14 @@ final class PostbackProcessorTest extends TestCase {
   }
 
   /**
-   * Creates a normalized v2 event for processor tests.
+   * Creates a normalized postback event for processor tests.
    */
   private function createParsedPostback(
     NovaPayStatus $status = NovaPayStatus::Holded,
+    PostbackVersion $version = PostbackVersion::V2,
   ): ParsedPostback {
     return new ParsedPostback(
-      PostbackVersion::V2,
+      $version,
       NormalizedPostbackEvent::fromValues(
         'session-uuid',
         $status->value,

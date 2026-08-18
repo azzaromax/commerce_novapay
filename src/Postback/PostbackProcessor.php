@@ -77,6 +77,12 @@ final class PostbackProcessor implements PostbackProcessorInterface {
     catch (InvalidPostbackException) {
       return PostbackResult::invalidPayload();
     }
+    if (
+      $parsed->getVersion() === PostbackVersion::V1
+      && $credentials->getMode() !== NovaPayMode::Test
+    ) {
+      return PostbackResult::invalidPayload();
+    }
     $event = $parsed->getEvent();
     $lock_name = SessionLockName::fromSessionId($event->getSessionId());
     if (!$this->lock->acquire($lock_name)) {

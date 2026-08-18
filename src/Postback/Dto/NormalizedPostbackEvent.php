@@ -9,7 +9,7 @@ use Drupal\commerce_novapay\Postback\NovaPayStatus;
 use Drupal\commerce_price\Calculator;
 
 /**
- * Contains the payment-relevant fields from the acquiring postback v2 schema.
+ * Contains payment-relevant fields shared by acquiring postback v1 and v2.
  */
 final class NormalizedPostbackEvent {
 
