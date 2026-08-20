@@ -36,12 +36,23 @@ final class PaymentOptionBranding {
   ) {}
 
   /**
-   * Marks every NovaPay payment option in a checkout form.
+   * Brands NovaPay payment options and the selected review summary.
    *
    * @phpstan-param array<array-key, mixed> $form
    */
-  public function alter(array &$form): void {
+  public function alter(
+    array &$form,
+    ?PaymentGatewayInterface $selected_gateway = NULL,
+  ): void {
     $this->alterElement($form);
+
+    if (
+      ($form['#step_id'] ?? NULL) === 'review'
+      && $selected_gateway instanceof PaymentGatewayInterface
+      && $this->shouldDisplayLogo((string) $selected_gateway->id())
+    ) {
+      $this->brandSelectedPaymentSummary($form, $selected_gateway);
+    }
   }
 
   /**
@@ -88,14 +99,53 @@ final class PaymentOptionBranding {
       return;
     }
 
-    $variables['title'] = [
+    $variables['title'] = $this->buildLogo(
+      $logo['alt'],
+      'commerce-novapay-payment-option-logo',
+    );
+  }
+
+  /**
+   * Replaces the selected NovaPay gateway label in the review pane.
+   *
+   * @phpstan-param array<array-key, mixed> $form
+   */
+  private function brandSelectedPaymentSummary(
+    array &$form,
+    PaymentGatewayInterface $gateway,
+  ): void {
+    $summary = $form['review']['payment_information']['summary'] ?? NULL;
+    if (
+      !is_array($summary)
+      || !isset($summary['payment_gateway'])
+      || !is_array($summary['payment_gateway'])
+      || !array_key_exists('#markup', $summary['payment_gateway'])
+    ) {
+      return;
+    }
+
+    $form['review']['payment_information']['summary']['payment_gateway'] =
+      $this->buildLogo(
+        (string) $gateway->getPlugin()->getDisplayLabel(),
+        'commerce-novapay-payment-summary-logo',
+      );
+  }
+
+  /**
+   * Builds an accessible render array for the packaged NovaPay logo.
+   *
+   * @return array<string, mixed>
+   *   The image render array.
+   */
+  private function buildLogo(string $alt, string $class): array {
+    return [
       '#theme' => 'image',
-      '#uri' => $logo['uri'],
-      '#alt' => $logo['alt'],
+      '#uri' => $this->logoUri(),
+      '#alt' => $alt,
       '#width' => 124,
       '#height' => 25,
       '#attributes' => [
-        'class' => ['commerce-novapay-payment-option-logo'],
+        'class' => [$class],
       ],
     ];
   }

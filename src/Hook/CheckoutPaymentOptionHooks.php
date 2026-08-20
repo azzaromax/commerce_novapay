@@ -6,7 +6,9 @@ namespace Drupal\commerce_novapay\Hook;
 
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Hook\Attribute\Hook;
+use Drupal\commerce_checkout\Plugin\Commerce\CheckoutFlow\CheckoutFlowInterface;
 use Drupal\commerce_novapay\Checkout\PaymentOptionBranding;
+use Drupal\commerce_payment\Entity\PaymentGatewayInterface;
 
 /**
  * Hook implementations for NovaPay checkout payment-option branding.
@@ -31,7 +33,17 @@ final class CheckoutPaymentOptionHooks {
     FormStateInterface $form_state,
     string $form_id,
   ): void {
-    $this->branding->alter($form);
+    $selected_gateway = NULL;
+    $form_object = $form_state->getFormObject();
+    if ($form_object instanceof CheckoutFlowInterface) {
+      $order = $form_object->getOrder();
+      $gateway = $order->get('payment_gateway')->entity;
+      if ($gateway instanceof PaymentGatewayInterface) {
+        $selected_gateway = $gateway;
+      }
+    }
+
+    $this->branding->alter($form, $selected_gateway);
   }
 
   /**

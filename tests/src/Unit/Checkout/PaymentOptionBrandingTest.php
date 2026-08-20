@@ -10,8 +10,10 @@ use Drupal\Core\Extension\ModuleExtensionList;
 use Drupal\commerce_novapay\Checkout\PaymentOptionBranding;
 use Drupal\commerce_payment\Entity\PaymentGatewayInterface;
 use Drupal\commerce_payment\PaymentOption;
+use Drupal\commerce_payment\Plugin\Commerce\PaymentGateway\PaymentGatewayInterface as PaymentGatewayPluginInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -162,6 +164,88 @@ final class PaymentOptionBrandingTest extends TestCase {
   }
 
   /**
+   * Tests that review shows the logo for the selected NovaPay gateway.
+   */
+  public function testBrandsSelectedNovaPayGatewayOnReview(): void {
+    $gateway = $this->createGateway('novapay');
+    $gateway->method('id')->willReturn('novapay_primary');
+    $gateway->method('getPlugin')->willReturn($this->createGatewayPlugin());
+    $storage = $this->createMock(EntityStorageInterface::class);
+    $storage->expects(self::once())
+      ->method('load')
+      ->with('novapay_primary')
+      ->willReturn($gateway);
+    $entity_type_manager = $this->createMock(EntityTypeManagerInterface::class);
+    $entity_type_manager->method('getStorage')
+      ->with('commerce_payment_gateway')
+      ->willReturn($storage);
+    $branding = $this->createBranding($entity_type_manager);
+    $form = $this->reviewForm('NovaPay checkout');
+
+    $branding->alter($form, $gateway);
+
+    self::assertSame(
+      [
+        '#theme' => 'image',
+        '#uri' => '/store/modules/custom/commerce_novapay/assets/images/logo.svg',
+        '#alt' => 'NovaPay checkout',
+        '#width' => 124,
+        '#height' => 25,
+        '#attributes' => [
+          'class' => ['commerce-novapay-payment-summary-logo'],
+        ],
+      ],
+      $form['review']['payment_information']['summary']['payment_gateway'],
+    );
+  }
+
+  /**
+   * Tests that review branding obeys the per-gateway display setting.
+   */
+  public function testReviewKeepsLabelWhenLogoIsDisabled(): void {
+    $gateway = $this->createGateway('novapay', FALSE);
+    $gateway->method('id')->willReturn('novapay_text');
+    $storage = $this->createMock(EntityStorageInterface::class);
+    $storage->expects(self::once())
+      ->method('load')
+      ->with('novapay_text')
+      ->willReturn($gateway);
+    $entity_type_manager = $this->createMock(EntityTypeManagerInterface::class);
+    $entity_type_manager->method('getStorage')
+      ->with('commerce_payment_gateway')
+      ->willReturn($storage);
+    $branding = $this->createBranding($entity_type_manager);
+    $form = $this->reviewForm('NovaPay text label');
+
+    $branding->alter($form, $gateway);
+
+    self::assertSame(
+      ['#markup' => 'NovaPay text label'],
+      $form['review']['payment_information']['summary']['payment_gateway'],
+    );
+  }
+
+  /**
+   * Tests that a similarly shaped summary outside review is not changed.
+   */
+  public function testDoesNotBrandSelectedGatewayOutsideReview(): void {
+    $entity_type_manager = $this->createMock(EntityTypeManagerInterface::class);
+    $entity_type_manager->expects(self::never())->method('getStorage');
+    $branding = $this->createBranding($entity_type_manager);
+    $gateway = $this->createGateway('novapay');
+    $gateway->method('id')->willReturn('novapay_primary');
+    $form = $this->reviewForm('NovaPay');
+    $form['#step_id'] = 'order_information';
+
+    $branding->alter($form, $gateway);
+
+    self::assertSame(
+      ['#markup' => 'NovaPay'],
+      $form['review']['payment_information']['summary']['payment_gateway'],
+    );
+  }
+
+  /**
    * Tests that unrelated and incomplete form elements are ignored.
    */
   public function testIgnoresNonPaymentForms(): void {
@@ -209,7 +293,7 @@ final class PaymentOptionBrandingTest extends TestCase {
   private function createGateway(
     string $plugin_id,
     ?bool $display_logo = NULL,
-  ): PaymentGatewayInterface {
+  ): PaymentGatewayInterface&MockObject {
     $gateway = $this->createMock(PaymentGatewayInterface::class);
     $gateway->method('getPluginId')->willReturn($plugin_id);
     $configuration = $display_logo === NULL
@@ -218,6 +302,37 @@ final class PaymentOptionBrandingTest extends TestCase {
     $gateway->method('getPluginConfiguration')->willReturn($configuration);
 
     return $gateway;
+  }
+
+  /**
+   * Creates a selected-gateway plugin mock with its checkout label.
+   */
+  private function createGatewayPlugin(): PaymentGatewayPluginInterface&MockObject {
+    $plugin = $this->createMock(PaymentGatewayPluginInterface::class);
+    $plugin->method('getDisplayLabel')->willReturn('NovaPay checkout');
+
+    return $plugin;
+  }
+
+  /**
+   * Builds the relevant part of Commerce's review render array.
+   *
+   * @return array<array-key, mixed>
+   *   A checkout review form.
+   */
+  private function reviewForm(string $label): array {
+    return [
+      '#step_id' => 'review',
+      'review' => [
+        'payment_information' => [
+          'summary' => [
+            'payment_gateway' => [
+              '#markup' => $label,
+            ],
+          ],
+        ],
+      ],
+    ];
   }
 
 }
