@@ -14,6 +14,7 @@ use Drupal\commerce_novapay\Api\Dto\Request\VoidRequest;
 use Drupal\commerce_novapay\Api\Dto\Response\AcknowledgementResponse;
 use Drupal\commerce_novapay\Api\Dto\Response\SessionStatusResponse;
 use Drupal\commerce_novapay\Api\NovaPayApiClientInterface;
+use Drupal\commerce_novapay\Credential\CredentialResolverInterface;
 use Drupal\commerce_novapay\Credential\Credentials;
 use Drupal\commerce_novapay\Credential\NovaPayMode;
 use Drupal\commerce_novapay\Exception\ApiFatalException;
@@ -243,6 +244,73 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
     self::assertArrayHasKey('novapay_pending_refund', $field_definitions);
     self::assertArrayHasKey('expires', $field_definitions);
 
+  }
+
+  /**
+   * Tests that missing recipient data limits capture to the full amount.
+   */
+  public function testCaptureFormLocksAmountWithoutRecipientIdentifier(): void {
+    $gateway_uuid = $this->paymentGateway->uuid();
+    self::assertIsString($gateway_uuid);
+    $credentials = new Credentials(
+      NovaPayMode::Test,
+      '2',
+      'private',
+      'public',
+    );
+    $without_recipient = new RuntimeConfiguration(
+      new RuntimeProfile(
+        NovaPayMode::Test,
+        NULL,
+        TransactionMode::Hold,
+        '',
+        FALSE,
+      ),
+      $credentials,
+    );
+    $with_recipient = new RuntimeConfiguration(
+      new RuntimeProfile(
+        NovaPayMode::Test,
+        NULL,
+        TransactionMode::Hold,
+        '31316718',
+        FALSE,
+      ),
+      $credentials,
+    );
+    $resolver = $this->createMock(CredentialResolverInterface::class);
+    $resolver->expects(self::exactly(2))
+      ->method('resolveRuntimeConfiguration')
+      ->with($gateway_uuid)
+      ->willReturn($without_recipient, $with_recipient);
+    $plugin = $this->paymentGateway->getPlugin();
+    $resolver_property = new \ReflectionProperty(
+      $plugin,
+      'credentialResolver',
+    );
+    $resolver_property->setValue($plugin, $resolver);
+
+    $payment = $this->createAuthorizationPayment('capture-form-session');
+    $plugin_form = new NovaPayCaptureForm();
+    $plugin_form->setEntity($payment);
+    $plugin_form->setPlugin($plugin);
+    $form = $plugin_form->buildConfigurationForm([], new FormState());
+
+    self::assertArrayHasKey('recipient_identifier_notice', $form);
+    self::assertTrue($form['amount']['#disabled']);
+    self::assertSame(
+      $payment->getAmount()->toArray(),
+      $form['amount']['#default_value'],
+    );
+    self::assertStringContainsString(
+      'Partial capture is unavailable',
+      (string) $form['recipient_identifier_notice']['#markup'],
+    );
+
+    $form = $plugin_form->buildConfigurationForm([], new FormState());
+
+    self::assertArrayNotHasKey('recipient_identifier_notice', $form);
+    self::assertArrayNotHasKey('#disabled', $form['amount']);
   }
 
   /**

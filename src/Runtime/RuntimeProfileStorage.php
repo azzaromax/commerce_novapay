@@ -34,7 +34,7 @@ final class RuntimeProfileStorage implements RuntimeProfileStorageInterface {
   public function load(string $gateway_uuid): ?RuntimeProfile {
     $this->assertGatewayUuid($gateway_uuid);
     $uri = $this->getDirectory($gateway_uuid) . '/settings.json';
-    if (!is_file($uri)) {
+    if (!@is_file($uri)) {
       return NULL;
     }
 
@@ -78,16 +78,23 @@ final class RuntimeProfileStorage implements RuntimeProfileStorageInterface {
   public function assertWritable(string $gateway_uuid): void {
     $this->assertGatewayUuid($gateway_uuid);
     $directory = $this->getDirectory($gateway_uuid);
-
+    $scheme = parse_url($directory, PHP_URL_SCHEME);
     if (
-      !is_dir($directory)
-      && !@mkdir($directory, 0700, TRUE)
-      && !is_dir($directory)
+      is_string($scheme)
+      && !in_array($scheme, stream_get_wrappers(), TRUE)
     ) {
       throw InvalidRuntimeProfileException::privateStorageUnavailable();
     }
 
-    if (!@chmod($directory, 0700) || !is_writable($directory)) {
+    if (
+      !@is_dir($directory)
+      && !@mkdir($directory, 0700, TRUE)
+      && !@is_dir($directory)
+    ) {
+      throw InvalidRuntimeProfileException::privateStorageUnavailable();
+    }
+
+    if (!@chmod($directory, 0700) || !@is_writable($directory)) {
       throw InvalidRuntimeProfileException::privateStorageUnavailable();
     }
   }
