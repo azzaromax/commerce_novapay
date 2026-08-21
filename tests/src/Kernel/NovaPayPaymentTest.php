@@ -1004,7 +1004,7 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
   }
 
   /**
-   * Tests partial capture locking and postback-only amount/state changes.
+   * Tests partial capture locking and postback-only final payment transition.
    */
   public function testPartialCaptureAwaitsPostback(): void {
     $payment = $this->createAuthorizationPayment('capture-session');
@@ -1059,7 +1059,10 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
       $payment = $this->reloadEntity($payment);
       self::assertInstanceOf(PaymentInterface::class, $payment);
       self::assertSame('completed', $payment->getState()->getId());
-      self::assertEquals(new Price('10', 'USD'), $payment->getAmount());
+      self::assertEquals(new Price('30', 'USD'), $payment->getAmount());
+      $this->order->save();
+      $this->reloadOrder();
+      self::assertEquals(new Price('0', 'USD'), $this->order->getBalance());
       self::assertTrue(
         $payment->get('novapay_pending_operation')->isEmpty(),
       );

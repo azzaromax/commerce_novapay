@@ -23,12 +23,13 @@ final class PaymentStatusMapper implements PaymentStatusMapperInterface {
     $state = $payment->getState();
     $transition_id = $this->getTransitionId($state->getId(), $status);
     if ($transition_id !== NULL) {
-      $this->applyConfirmedCaptureAmount($payment, $status);
+      $this->validateConfirmedPartialCapture($payment, $status);
       $this->applyConfirmedFullRefund($payment, $status);
       $this->clearPendingOperation($payment);
       $state->applyTransitionById($transition_id);
       $payment->setRemoteState($status->value);
       $payment->save();
+      $payment->getOrder()->save();
       return TRUE;
     }
 
@@ -100,9 +101,13 @@ final class PaymentStatusMapper implements PaymentStatusMapperInterface {
   }
 
   /**
-   * Applies a submitted partial capture only when its postback is final.
+   * Validates a submitted partial capture once its postback is final.
+   *
+   * NovaPay releases the remainder of a partially completed hold. The business
+   * workflow treats that final postback as payment of the whole order, so the
+   * original authorization amount must remain on the Commerce payment.
    */
-  private function applyConfirmedCaptureAmount(
+  private function validateConfirmedPartialCapture(
     PaymentInterface $payment,
     NovaPayStatus $status,
   ): void {
@@ -140,7 +145,6 @@ final class PaymentStatusMapper implements PaymentStatusMapperInterface {
       );
     }
 
-    $payment->setAmount($capture_amount);
   }
 
   /**
