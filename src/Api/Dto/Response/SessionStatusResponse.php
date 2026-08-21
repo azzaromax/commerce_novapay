@@ -55,7 +55,10 @@ final class SessionStatusResponse {
       if (!is_array($operation)) {
         throw new \InvalidArgumentException('Status response is invalid.');
       }
-      if (!array_key_exists('refunded_amount', $operation)) {
+      if (
+        !array_key_exists('refunded_amount', $operation)
+        || $operation['refunded_amount'] === NULL
+      ) {
         continue;
       }
       $transaction_id = self::validateIdentifier(

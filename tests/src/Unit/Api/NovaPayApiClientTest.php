@@ -222,6 +222,10 @@ final class NovaPayApiClientTest extends TestCase {
           'transaction_id' => 'operation-1',
           'refunded_amount' => 15,
           'status' => 'voided',
+        ], [
+          'transaction_id' => 'operation-without-refund',
+          'refunded_amount' => NULL,
+          'status' => 'holded',
         ]],
       ], JSON_THROW_ON_ERROR))],
       $history,
@@ -236,6 +240,9 @@ final class NovaPayApiClientTest extends TestCase {
     self::assertSame('session-123', $response->getSessionId());
     self::assertSame('paid', $response->getStatus()->value);
     self::assertSame('15', $response->getRefundedAmount('operation-1'));
+    self::assertNull(
+      $response->getRefundedAmount('operation-without-refund'),
+    );
     self::assertNull($response->getRefundedAmount('unknown'));
     self::assertCount(1, $history);
     /** @var array<mixed, mixed> $transaction */

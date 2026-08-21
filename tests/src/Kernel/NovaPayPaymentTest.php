@@ -1016,7 +1016,6 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
         self::callback(static function (CompleteHoldRequest $request): bool {
           return $request->toArray() === [
             'session_id' => 'capture-session',
-            'amount' => '10',
             'operations' => [[
               'id' => 'operation-id',
               'amount' => '10',
@@ -1476,6 +1475,38 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
     self::assertSame('authorization', $payment->getState()->getId());
     self::assertSame('void', $payment->get('novapay_pending_operation')->getString());
     self::assertSame('processing_void', $payment->getRemoteState());
+  }
+
+  /**
+   * Tests that a confirmed unchanged hold unblocks a failed capture retry.
+   */
+  public function testPaymentStatusCheckClearsPendingCaptureForHolded(): void {
+    $payment = $this->createAuthorizationPayment('holded-status-session');
+    $payment->set('novapay_pending_operation', 'capture');
+    $payment->set('novapay_pending_amount', '10');
+    $payment->save();
+    $api_client = $this->createMock(NovaPayApiClientInterface::class);
+    $api_client->expects(self::once())->method('getStatus')
+      ->willReturn(SessionStatusResponse::fromArray([
+        'id' => 'holded-status-session',
+        'status' => 'holded',
+        'operations' => [[
+          'transaction_id' => 'operation-id',
+          'refunded_amount' => NULL,
+        ]],
+      ]));
+    $manager = $this->createPaymentStatusCheckManager($api_client);
+
+    self::assertSame(
+      PaymentStatusCheckResult::Reconciled,
+      $manager->checkStatus($payment, $this->createRuntimeProvider()),
+    );
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    self::assertSame('authorization', $payment->getState()->getId());
+    self::assertSame('holded', $payment->getRemoteState());
+    self::assertTrue($payment->get('novapay_pending_operation')->isEmpty());
+    self::assertTrue($payment->get('novapay_pending_amount')->isEmpty());
   }
 
   /**

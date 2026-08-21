@@ -99,10 +99,10 @@ final class AuthorizationOperationManager implements AuthorizationOperationManag
             );
           }
 
-          $request_amount = $capture_amount->getNumber();
+          $operation_amount = $capture_amount->getNumber();
           $operations[] = [
             'id' => $operation_id,
-            'amount' => $request_amount,
+            'amount' => $operation_amount,
             'recipient_identifier' => $recipient_identifier,
           ];
         }

@@ -41,7 +41,38 @@ final class PaymentStatusMapper implements PaymentStatusMapperInterface {
       return TRUE;
     }
 
+    if ($this->canClearPendingOperationForHolded($payment, $status)) {
+      $this->clearPendingOperation($payment);
+      $payment->setRemoteState($status->value);
+      $payment->save();
+      return TRUE;
+    }
+
     return FALSE;
+  }
+
+  /**
+   * Clears an uncertain capture or void once NovaPay confirms the hold remains.
+   */
+  private function canClearPendingOperationForHolded(
+    PaymentInterface $payment,
+    NovaPayStatus $status,
+  ): bool {
+    if (
+      $status !== NovaPayStatus::Holded
+      || $payment->getState()->getId() !== 'authorization'
+      || !$payment->hasField('novapay_pending_operation')
+    ) {
+      return FALSE;
+    }
+
+    return in_array(
+      PendingOperation::tryFrom(
+        $payment->get('novapay_pending_operation')->getString(),
+      ),
+      [PendingOperation::Capture, PendingOperation::Void],
+      TRUE,
+    );
   }
 
   /**
