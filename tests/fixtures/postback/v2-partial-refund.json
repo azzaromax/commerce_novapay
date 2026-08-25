@@ -1,0 +1,1 @@
+{"id":"session-refund","status":"paid","payments":[{"external_id":"ORDER-1004","amount":"12.50","refund_amount":"2.50","products":[{"external_id":"11","amount":"12.50","refund_amount":"2.50"}]}]}

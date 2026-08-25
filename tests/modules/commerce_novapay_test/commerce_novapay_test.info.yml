@@ -1,0 +1,7 @@
+name: Commerce NovaPay test support
+type: module
+description: 'Provides browser-only fixtures for Commerce NovaPay tests.'
+package: Testing
+core_version_requirement: ^11
+dependencies:
+  - commerce_novapay:commerce_novapay

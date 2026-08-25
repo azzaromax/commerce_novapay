@@ -1,0 +1,8 @@
+commerce_novapay_test.refund_calculator:
+  path: '/commerce-novapay-test/refund-calculator'
+  defaults:
+    _form: '\Drupal\commerce_novapay_test\Form\RefundCalculatorTestForm'
+    _title: 'NovaPay refund calculator test'
+  requirements:
+    # This route exists only in an explicitly enabled test-support module.
+    _access: 'TRUE'
