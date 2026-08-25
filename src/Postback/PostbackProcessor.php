@@ -109,8 +109,10 @@ final class PostbackProcessor implements PostbackProcessorInterface {
             $payment,
             $event->getStatus(),
           );
+          $skip_status_mapping = $event->getStatus() === NovaPayStatus::Voided
+            && $this->refund_manager->hasPendingPartialRefund($payment);
           $this->refund_manager->confirm($payment, $event, $event_key);
-          $status_applied = $this->status_mapper->apply(
+          $status_applied = !$skip_status_mapping && $this->status_mapper->apply(
             $payment,
             $event->getStatus(),
           );

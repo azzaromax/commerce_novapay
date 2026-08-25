@@ -373,6 +373,36 @@ final class PostbackProcessorTest extends TestCase {
   }
 
   /**
+   * Tests that a terminal void cannot map a pending partial refund as full.
+   */
+  public function testVoidedEventSkipsMappingForPendingPartialRefund(): void {
+    $this->verifier->method('verify')->willReturn(TRUE);
+    $parsed = $this->createParsedPostback(NovaPayStatus::Voided);
+    $this->parser->method('parse')->willReturn($parsed);
+    $payment = $this->createMock(PaymentInterface::class);
+    $payment->method('hasField')->willReturn(FALSE);
+    $payment_storage = $this->createMock(PaymentStorageInterface::class);
+    $payment_storage->method('loadByProperties')->willReturn([$payment]);
+    $this->entityTypeManager->method('getStorage')
+      ->with('commerce_payment')->willReturn($payment_storage);
+    $this->refundManager->expects(self::once())
+      ->method('hasPendingPartialRefund')
+      ->with($payment)
+      ->willReturn(TRUE);
+    $this->refundManager->expects(self::once())->method('confirm');
+    $this->statusMapper->expects(self::never())->method('apply');
+
+    $result = $this->processor->process(
+      $this->gateway,
+      $this->gatewayPlugin,
+      'partial-voided-json',
+      'valid-signature',
+    );
+
+    self::assertSame(PostbackOutcome::Ignored, $result->getOutcome());
+  }
+
+  /**
    * Tests that a valid stale status is acknowledged without claiming mutation.
    */
   public function testIgnoredNormalizedEventIsReportedAccurately(): void {

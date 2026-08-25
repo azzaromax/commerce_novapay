@@ -51,6 +51,13 @@ interface RefundOperationManagerInterface {
   ): void;
 
   /**
+   * Returns whether a payment has a pending item-level refund.
+   *
+   * A `voided` callback can confirm only a full refund intent.
+   */
+  public function hasPendingPartialRefund(PaymentInterface $payment): bool;
+
+  /**
    * Reconciles a pending refund against NovaPay's session status.
    */
   public function checkStatus(

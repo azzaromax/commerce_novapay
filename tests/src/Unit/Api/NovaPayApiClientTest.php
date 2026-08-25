@@ -313,7 +313,7 @@ final class NovaPayApiClientTest extends TestCase {
   public function testValidationExceptionContainsOnlyCodesAndPaths(): void {
     $history = new \ArrayObject();
     $client = $this->createClient(
-      [new Response(422, [], '{"type":"validation","errors":[{"code":"custom","path":"client_phone","message":"+380501234567"}]}')],
+      [new Response(422, [], '{"uuid":"a82ce764-2810-46b0-ace1-b02d7a2706fa","type":"validation","errors":[{"code":"custom","path":"client_phone","message":"+380501234567"}]}')],
       $history,
       $this->createRecordingSigner(),
     );
@@ -329,6 +329,10 @@ final class NovaPayApiClientTest extends TestCase {
       self::assertCount(1, $exception->getViolations());
       self::assertSame('custom', $exception->getViolations()[0]->getCode());
       self::assertSame('client_phone', $exception->getViolations()[0]->getPath());
+      self::assertSame(
+        'a82ce764-2810-46b0-ace1-b02d7a2706fa',
+        $exception->getRequestUuid(),
+      );
       self::assertStringNotContainsString('+380501234567', $exception->getMessage());
     }
   }

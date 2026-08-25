@@ -86,6 +86,23 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
   /**
    * {@inheritdoc}
    */
+  public function hasPendingPartialRefund(PaymentInterface $payment): bool {
+    if (!$this->canCheckStatus($payment)) {
+      return FALSE;
+    }
+
+    try {
+      [$is_full] = $this->decodePending($payment);
+      return !$is_full;
+    }
+    catch (\Throwable) {
+      return FALSE;
+    }
+  }
+
+  /**
+   * {@inheritdoc}
+   */
   public function getRefundableItems(PaymentInterface $payment): array {
     $payment_id = $this->requirePaymentId($payment);
     $order = $payment->getOrder();
@@ -178,15 +195,20 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
         );
       }
 
-      if ($this->isEmptySelection($quantities)) {
+      // Commerce invokes the gateway's standard full-refund API without an
+      // item selection. The item form always submits its rows, so a non-empty
+      // all-zero selection remains a deliberate no-op and is rejected below.
+      $is_full = $quantities === [];
+      if (!$is_full && $this->isEmptySelection($quantities)) {
         throw InvalidRequestException::createForPayment(
           $current,
           'Select a positive quantity before submitting a NovaPay refund.',
         );
       }
-      $is_full = FALSE;
-      $items = $this->buildPartialSelection($current, $quantities);
-      if ($this->isCompleteSelection($current, $items)) {
+      $items = $is_full
+        ? $this->buildFullSelection($current)
+        : $this->buildPartialSelection($current, $quantities);
+      if (!$is_full && $this->isCompleteSelection($current, $items)) {
         $is_full = TRUE;
         $items = $this->buildFullSelection($current);
       }
@@ -396,6 +418,12 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     }
 
     [$is_full, $processing_seen, $items] = $this->decodePending($payment);
+    // A partial refund must be confirmed by the documented paid/status amount
+    // evidence. Never treat a terminal session void as a full refund merely
+    // because it arrived while an item-level intent is pending.
+    if (!$is_full && $event->getStatus() === NovaPayStatus::Voided) {
+      return;
+    }
     if (
       !$is_full
       && !$processing_seen
@@ -805,11 +833,6 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     PaymentInterface $payment,
     array $selections,
   ): bool {
-    $balance = $payment->getBalance();
-    if (!$balance instanceof Price) {
-      return FALSE;
-    }
-
     $selected_quantities = [];
     foreach ($selections as $selection) {
       $selected_quantities[$selection->getOrderItemId()]
@@ -829,7 +852,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
       }
     }
 
-    return $this->getSelectionTotal($selections, $payment)->equals($balance);
+    return TRUE;
   }
 
   /**

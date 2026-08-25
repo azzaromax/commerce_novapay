@@ -257,6 +257,21 @@ final class NovaPayApiClient implements NovaPayApiClientInterface {
         ]);
         throw $exception;
       }
+      catch (ApiValidationException $exception) {
+        $this->logger->logError('api_http_error', [
+          'endpoint' => $path,
+          'http_status' => $response->getStatusCode(),
+          'request_uuid' => $exception->getRequestUuid(),
+          'validation_violations' => array_map(
+            static fn (ValidationViolation $violation): array => [
+              'code' => $violation->getCode(),
+              'path' => $violation->getPath(),
+            ],
+            $exception->getViolations(),
+          ),
+        ]);
+        throw $exception;
+      }
       catch (NovaPayApiException $exception) {
         $this->logger->logError('api_http_error', [
           'endpoint' => $path,
@@ -381,6 +396,7 @@ final class NovaPayApiClient implements NovaPayApiClientInterface {
         throw new ApiValidationException(
           $status,
           $this->getValidationViolations($data),
+          $this->getUuid($data['uuid'] ?? NULL),
         );
 
       case 'processing':

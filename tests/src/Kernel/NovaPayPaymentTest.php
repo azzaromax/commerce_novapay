@@ -627,6 +627,7 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
    * Tests that item selections aggregate into the original NovaPay operation.
    */
   public function testPartialRefundUsesThePrimaryPaymentOperation(): void {
+    $this->setQuantityStep('0.5');
     $additional_item = OrderItem::create([
       'type' => 'test',
       'title' => 'Additional NovaPay product',
@@ -675,12 +676,77 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
    */
   public function testEmptySelectionDoesNotRequestRefund(): void {
     $payment = $this->createCompletedPayment('full-refund-session');
+    $order_item_id = (int) $this->order->getItems()[0]->id();
     $api_client = $this->createMock(NovaPayApiClientInterface::class);
     $api_client->expects(self::never())->method('voidPayment');
     $manager = $this->createRefundOperationManager($api_client);
     $this->expectException(InvalidRequestException::class);
     $this->expectExceptionMessage('Select a positive quantity');
-    $manager->refund($payment, $this->createRuntimeProvider(), []);
+    $manager->refund(
+      $payment,
+      $this->createRuntimeProvider(),
+      [$order_item_id => '0'],
+    );
+  }
+
+  /**
+   * Tests that a full item selection is not downgraded by price allocation.
+   */
+  public function testCompleteSelectionUsesFullVoidDespiteBalanceDifference(): void {
+    $payment = $this->createCompletedPayment('allocation-full-session');
+    $order_item = $this->order->getItems()[0];
+    $order_item->setUnitPrice(new Price('29', 'USD'));
+    $order_item->save();
+    $order_item_id = (int) $order_item->id();
+    $api_client = $this->createMock(NovaPayApiClientInterface::class);
+    $api_client->expects(self::once())->method('voidPayment')
+      ->with(
+        self::isInstanceOf(RuntimeConfigurationProviderInterface::class),
+        self::callback(static fn (VoidRequest $request): bool =>
+          $request->toArray() === ['session_id' => 'allocation-full-session']),
+      )
+      ->willReturn(new AcknowledgementResponse(200));
+
+    $this->createRefundOperationManager($api_client)->refund(
+      $payment,
+      $this->createRuntimeProvider(),
+      [$order_item_id => '1'],
+    );
+  }
+
+  /**
+   * Tests that a partial pending refund ignores a terminal void callback.
+   */
+  public function testPartialRefundDoesNotTreatVoidedAsFullConfirmation(): void {
+    $this->setQuantityStep('0.5');
+    $payment = $this->createCompletedPayment('partial-voided-session');
+    $order_item_id = (int) $this->order->getItems()[0]->id();
+    $api_client = $this->createMock(NovaPayApiClientInterface::class);
+    $api_client->method('voidPayment')->willReturn(new AcknowledgementResponse(200));
+    $manager = $this->createRefundOperationManager($api_client);
+    $manager->refund(
+      $payment,
+      $this->createRuntimeProvider(),
+      [$order_item_id => '0.5'],
+    );
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+
+    $manager->confirm(
+      $payment,
+      NormalizedPostbackEvent::fromValues(
+        'partial-voided-session',
+        NovaPayStatus::Voided->value,
+        [],
+      ),
+      hash('sha256', 'partial-voided'),
+    );
+
+    $payment = $this->reloadEntity($payment);
+    self::assertInstanceOf(PaymentInterface::class, $payment);
+    self::assertSame('completed', $payment->getState()->getId());
+    self::assertEquals(new Price('0', 'USD'), $payment->getRefundedAmount());
+    self::assertTrue($manager->canCheckStatus($payment));
   }
 
   /**
@@ -967,6 +1033,10 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
     self::assertSame(
       '1',
       $form['items'][$order_item_id]['quantity']['#step'],
+    );
+    self::assertSame(
+      '0',
+      $form['items'][$order_item_id]['quantity']['#default_value'],
     );
 
     try {

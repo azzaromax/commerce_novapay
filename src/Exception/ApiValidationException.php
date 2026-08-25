@@ -16,10 +16,13 @@ final class ApiValidationException extends NovaPayApiException {
    *   NovaPay HTTP response status.
    * @param list<\Drupal\commerce_novapay\Api\Dto\Response\ValidationViolation> $violations
    *   Non-sensitive validation details.
+   * @param string|null $request_uuid
+   *   Validated NovaPay request UUID for support escalation.
    */
   public function __construct(
     int $http_status,
     private readonly array $violations,
+    private readonly ?string $request_uuid = NULL,
   ) {
     parent::__construct('NovaPay rejected the request data.', $http_status);
   }
@@ -32,6 +35,13 @@ final class ApiValidationException extends NovaPayApiException {
    */
   public function getViolations(): array {
     return $this->violations;
+  }
+
+  /**
+   * Gets the safe NovaPay request UUID for support escalation.
+   */
+  public function getRequestUuid(): ?string {
+    return $this->request_uuid;
   }
 
 }
