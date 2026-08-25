@@ -354,6 +354,34 @@ final class NovaPayApiClientTest extends TestCase {
     catch (ApiProcessingException $exception) {
       self::assertSame(400, $exception->getHttpStatus());
       self::assertNull($exception->getApiCode());
+      self::assertNull($exception->getRequestUuid());
+    }
+  }
+
+  /**
+   * Tests that a documented processing UUID is retained safely.
+   */
+  public function testProcessingExceptionRetainsRequestUuid(): void {
+    $history = new \ArrayObject();
+    $client = $this->createClient(
+      [new Response(400, [], '{"uuid":"d7c9274f-0e61-45c0-83b3-92e7448da1a4","type":"processing","code":"RefundError"}')],
+      $history,
+      $this->createRecordingSigner(),
+    );
+
+    try {
+      $client->voidPayment(
+        $this->createGateway(NovaPayMode::Test),
+        new VoidRequest('session-123'),
+      );
+      self::fail('A processing response must throw an exception.');
+    }
+    catch (ApiProcessingException $exception) {
+      self::assertSame('RefundError', $exception->getApiCode());
+      self::assertSame(
+        'd7c9274f-0e61-45c0-83b3-92e7448da1a4',
+        $exception->getRequestUuid(),
+      );
     }
   }
 

@@ -198,6 +198,7 @@ final class CheckoutCoordinatorTest extends TestCase {
       'session-id',
       '100.00',
       FALSE,
+      'ORDER-10',
     );
     $this->payloadBuilder->expects(self::once())
       ->method('buildSessionRequest')
@@ -245,12 +246,13 @@ final class CheckoutCoordinatorTest extends TestCase {
       ->with('created')->willReturnSelf();
     $this->payment->expects(self::once())->method('setExpiresTime')
       ->with(self::REQUEST_TIME + 2505600)->willReturnSelf();
-    $this->payment->expects(self::exactly(2))->method('set')
+    $this->payment->expects(self::exactly(3))->method('set')
       ->willReturnCallback(function (string $field, string $value): PaymentInterface {
         self::assertContains(
           [$field, $value],
           [
             ['novapay_operation_id', 'operation-id'],
+            ['novapay_external_id', 'ORDER-10'],
             ['novapay_payment_url', 'https://qecom.novapay.ua/session-id'],
           ],
         );

@@ -82,7 +82,7 @@ final class NovaPayRefundForm extends PaymentGatewayFormBase {
           ['@item' => $item->getTitle()],
         ),
         '#title_display' => 'invisible',
-        '#default_value' => '',
+        '#default_value' => '0',
         '#min' => 0,
         '#max' => $item->getAvailableQuantity(),
         '#step' => $item->getQuantityStep(),
@@ -114,7 +114,7 @@ final class NovaPayRefundForm extends PaymentGatewayFormBase {
     $form['empty_selection'] = [
       '#type' => 'item',
       '#markup' => $this->t(
-        'Leave every quantity empty or zero to request a full refund.',
+        'Set a quantity to zero to keep that order item. Select every remaining quantity to request a full refund.',
       ),
     ];
     $form['#attached']['library'][] = 'commerce_novapay/refund_form';
@@ -144,6 +144,12 @@ final class NovaPayRefundForm extends PaymentGatewayFormBase {
     foreach ($this->getSubmittedQuantities($form, $form_state) as $id => $quantity) {
       $quantity = trim($quantity);
       if ($quantity === '') {
+        continue;
+      }
+      if (
+        preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/D', $quantity) === 1
+        && Calculator::compare($quantity, '0') === 0
+      ) {
         continue;
       }
       if (

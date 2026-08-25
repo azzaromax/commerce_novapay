@@ -32,6 +32,13 @@ final class NovaPayPayment extends PaymentTypeBase {
       ))
       ->setSetting('max_length', 255);
 
+    $fields['novapay_external_id'] = BundleFieldDefinition::create('string')
+      ->setLabel(new TranslatableMarkup('NovaPay external operation ID'))
+      ->setDescription(new TranslatableMarkup(
+        'The external ID supplied when the NovaPay payment operation was created.',
+      ))
+      ->setSetting('max_length', 255);
+
     $fields['novapay_payment_url'] = BundleFieldDefinition::create('uri')
       ->setLabel(new TranslatableMarkup('NovaPay payment URL'))
       ->setDescription(new TranslatableMarkup(

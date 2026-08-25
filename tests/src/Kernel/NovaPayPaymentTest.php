@@ -238,6 +238,7 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
       ->get('entity_field.manager')
       ->getFieldDefinitions('commerce_payment', 'novapay_payment');
     self::assertArrayHasKey('novapay_operation_id', $field_definitions);
+    self::assertArrayHasKey('novapay_external_id', $field_definitions);
     self::assertArrayHasKey('novapay_payment_url', $field_definitions);
     self::assertArrayHasKey('novapay_pending_operation', $field_definitions);
     self::assertArrayHasKey('novapay_pending_amount', $field_definitions);
@@ -437,6 +438,7 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
       'remote_id' => 'session-id',
       'remote_state' => 'paid',
       'novapay_operation_id' => 'operation-id',
+      'novapay_external_id' => 'ORDER-1',
       'novapay_payment_url' => 'https://example.com/pay/session-id',
     ]);
     self::assertInstanceOf(PaymentInterface::class, $payment);
@@ -448,6 +450,10 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
     self::assertSame(
       'operation-id',
       $payment->get('novapay_operation_id')->value,
+    );
+    self::assertSame(
+      'ORDER-1',
+      $payment->get('novapay_external_id')->value,
     );
     self::assertSame(
       'https://example.com/pay/session-id',
@@ -618,51 +624,96 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
   }
 
   /**
-   * Tests that an empty item selection submits and confirms a full refund.
+   * Tests that item selections aggregate into the original NovaPay operation.
    */
-  public function testEmptySelectionRequestsFullRefund(): void {
+  public function testPartialRefundUsesThePrimaryPaymentOperation(): void {
+    $additional_item = OrderItem::create([
+      'type' => 'test',
+      'title' => 'Additional NovaPay product',
+      'quantity' => '1',
+      'unit_price' => new Price('5', 'USD'),
+    ]);
+    $additional_item->save();
+    $this->order->addItem($additional_item);
+    $this->order->save();
+    $this->reloadOrder();
+
+    $payment = $this->createCompletedPayment('aggregate-refund-session');
+    $items = $this->order->getItems();
+    $requests = [];
+    $api_client = $this->createMock(NovaPayApiClientInterface::class);
+    $api_client->method('voidPayment')->willReturnCallback(
+      static function (
+        RuntimeConfigurationProviderInterface $gateway,
+        VoidRequest $request,
+      ) use (&$requests): AcknowledgementResponse {
+        $requests[] = $request->toArray();
+        return new AcknowledgementResponse(200);
+      },
+    );
+
+    $this->createRefundOperationManager($api_client)->refund(
+      $payment,
+      $this->createRuntimeProvider(),
+      [
+        (int) $items[0]->id() => '0.5',
+        (int) $items[1]->id() => '1',
+      ],
+    );
+
+    self::assertSame([[
+      'session_id' => 'aggregate-refund-session',
+      'operations' => [[
+        'id' => 'operation-id',
+        'refund_amount' => '20',
+      ]],
+    ]], $requests);
+  }
+
+  /**
+   * Tests that an empty item selection does not contact NovaPay.
+   */
+  public function testEmptySelectionDoesNotRequestRefund(): void {
     $payment = $this->createCompletedPayment('full-refund-session');
     $api_client = $this->createMock(NovaPayApiClientInterface::class);
-    $api_client->expects(self::once())->method('voidPayment')
-      ->with(
-        self::isInstanceOf(RuntimeConfigurationProviderInterface::class),
-        self::callback(static fn (VoidRequest $request): bool =>
-          $request->toArray() === ['session_id' => 'full-refund-session']),
-      )
-      ->willReturn(new AcknowledgementResponse(200));
+    $api_client->expects(self::never())->method('voidPayment');
     $manager = $this->createRefundOperationManager($api_client);
+    $this->expectException(InvalidRequestException::class);
+    $this->expectExceptionMessage('Select a positive quantity');
     $manager->refund($payment, $this->createRuntimeProvider(), []);
+  }
+
+  /**
+   * Tests that a documented refund failure can be corrected or escalated.
+   */
+  public function testRefundErrorClearsPendingMarkerAndIsActionable(): void {
+    $this->setQuantityStep('0.5');
+    $payment = $this->createCompletedPayment('refund-error-session');
+    $order_item_id = (int) $this->order->getItems()[0]->id();
+    $api_client = $this->createMock(NovaPayApiClientInterface::class);
+    $api_client->expects(self::once())
+      ->method('voidPayment')
+      ->willThrowException(new ApiProcessingException(400, 'RefundError'));
+    $manager = $this->createRefundOperationManager($api_client);
+
+    try {
+      $manager->refund(
+        $payment,
+        $this->createRuntimeProvider(),
+        [$order_item_id => '0.5'],
+      );
+      self::fail('A rejected refund must fail the form request.');
+    }
+    catch (PaymentGatewayException $exception) {
+      self::assertStringContainsString('RefundError', $exception->getMessage());
+      self::assertStringContainsString('support', $exception->getMessage());
+    }
 
     $payment = $this->reloadEntity($payment);
     self::assertInstanceOf(PaymentInterface::class, $payment);
-    $processing_event = NormalizedPostbackEvent::fromValues(
-      'full-refund-session',
-      'processing_void',
-      [(string) $this->order->id()],
-    );
-    $manager->confirm(
-      $payment,
-      $processing_event,
-      hash('sha256', 'processing-full'),
-    );
-    self::assertSame(0, $this->countRefundLedgerRows($payment));
-
-    $final_event = NormalizedPostbackEvent::fromValues(
-      'full-refund-session',
-      'voided',
-      [(string) $this->order->id()],
-    );
-    $manager->confirm(
-      $payment,
-      $final_event,
-      hash('sha256', 'confirmed-full'),
-    );
-    (new PaymentStatusMapper())->apply($payment, NovaPayStatus::Voided);
-    $payment = $this->reloadEntity($payment);
-    self::assertInstanceOf(PaymentInterface::class, $payment);
-    self::assertSame('refunded', $payment->getState()->getId());
-    self::assertEquals(new Price('30', 'USD'), $payment->getRefundedAmount());
-    self::assertSame(1, $this->countRefundLedgerRows($payment));
+    self::assertTrue($payment->get('novapay_pending_operation')->isEmpty());
+    self::assertTrue($payment->get('novapay_pending_refund')->isEmpty());
+    self::assertTrue($manager->canRefund($payment));
   }
 
   /**
@@ -1004,7 +1055,7 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
   }
 
   /**
-   * Tests partial capture locking and postback-only final payment transition.
+   * Tests partial capture locking and postback-only amount/state changes.
    */
   public function testPartialCaptureAwaitsPostback(): void {
     $payment = $this->createAuthorizationPayment('capture-session');
@@ -1059,10 +1110,10 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
       $payment = $this->reloadEntity($payment);
       self::assertInstanceOf(PaymentInterface::class, $payment);
       self::assertSame('completed', $payment->getState()->getId());
-      self::assertEquals(new Price('30', 'USD'), $payment->getAmount());
+      self::assertEquals(new Price('10', 'USD'), $payment->getAmount());
       $this->order->save();
       $this->reloadOrder();
-      self::assertEquals(new Price('0', 'USD'), $this->order->getBalance());
+      self::assertEquals(new Price('20', 'USD'), $this->order->getBalance());
       self::assertTrue(
         $payment->get('novapay_pending_operation')->isEmpty(),
       );
@@ -1570,6 +1621,7 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
       'remote_id' => $session_id,
       'remote_state' => 'paid',
       'novapay_operation_id' => 'operation-id',
+      'novapay_external_id' => (string) $this->order->getOrderNumber(),
     ]);
     self::assertInstanceOf(PaymentInterface::class, $payment);
     $payment->save();

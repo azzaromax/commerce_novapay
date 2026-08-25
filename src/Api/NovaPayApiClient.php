@@ -21,6 +21,7 @@ use Drupal\commerce_novapay\Exception\ApiRequestException;
 use Drupal\commerce_novapay\Exception\ApiTransportException;
 use Drupal\commerce_novapay\Exception\ApiUnexpectedResponseException;
 use Drupal\commerce_novapay\Exception\ApiValidationException;
+use Drupal\commerce_novapay\Exception\NovaPayApiException;
 use Drupal\commerce_novapay\Logging\NovaPayLoggerInterface;
 use Drupal\commerce_novapay\Runtime\RuntimeConfiguration;
 use Drupal\commerce_novapay\Runtime\RuntimeConfigurationProviderInterface;
@@ -241,11 +242,29 @@ final class NovaPayApiClient implements NovaPayApiClientInterface {
     $response = $response->withBody(Utils::streamFor($response_body));
 
     if ($response->getStatusCode() < 200 || $response->getStatusCode() >= 300) {
-      $this->logger->logError('api_http_error', [
-        'endpoint' => $path,
-        'http_status' => $response->getStatusCode(),
-      ]);
-      $this->throwApiError($response, $path);
+      try {
+        $this->throwApiError($response, $path);
+      }
+      catch (ApiProcessingException $exception) {
+        // Persist only stable, non-PII diagnostic fields. The response body
+        // remains available exclusively through explicitly enabled detailed
+        // logging.
+        $this->logger->logError('api_http_error', [
+          'endpoint' => $path,
+          'http_status' => $response->getStatusCode(),
+          'api_error_code' => $exception->getApiCode(),
+          'request_uuid' => $exception->getRequestUuid(),
+        ]);
+        throw $exception;
+      }
+      catch (NovaPayApiException $exception) {
+        $this->logger->logError('api_http_error', [
+          'endpoint' => $path,
+          'http_status' => $response->getStatusCode(),
+          'source' => $exception::class,
+        ]);
+        throw $exception;
+      }
     }
 
     return $response;
@@ -368,6 +387,7 @@ final class NovaPayApiClient implements NovaPayApiClientInterface {
         throw new ApiProcessingException(
           $status,
           $this->getSafeString($data['code'] ?? NULL, 128),
+          $this->getUuid($data['uuid'] ?? NULL),
         );
 
       case 'fatal':
@@ -491,6 +511,20 @@ final class NovaPayApiClient implements NovaPayApiClientInterface {
       ? '/^[A-Za-z0-9_.\/-]*$/D'
       : '/^[A-Za-z0-9_.:-]*$/D';
     return preg_match($pattern, $value) === 1 ? $value : NULL;
+  }
+
+  /**
+   * Returns a strictly validated NovaPay request UUID.
+   */
+  private function getUuid(mixed $value): ?string {
+    if (!is_string($value)) {
+      return NULL;
+    }
+
+    return preg_match(
+      '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/Di',
+      $value,
+    ) === 1 ? strtolower($value) : NULL;
   }
 
 }

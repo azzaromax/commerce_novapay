@@ -206,3 +206,21 @@ function commerce_novapay_update_11005(): void {
     ['commerce_novapay'],
   );
 }
+
+/**
+ * Adds the immutable external operation ID used by partial refunds.
+ */
+function commerce_novapay_update_11006(): void {
+  $payment_type_manager = \Drupal::service(
+    'plugin.manager.commerce_payment_type',
+  );
+  $payment_type_manager->clearCachedDefinitions();
+
+  $entity_type = \Drupal::entityTypeManager()->getDefinition(
+    'commerce_payment',
+  );
+  \Drupal::service('entity.bundle_plugin_installer')->installBundles(
+    $entity_type,
+    ['commerce_novapay'],
+  );
+}

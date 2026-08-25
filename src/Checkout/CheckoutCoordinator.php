@@ -145,6 +145,7 @@ final class CheckoutCoordinator implements CheckoutCoordinatorInterface {
         $this->time->getRequestTime() + self::SESSION_LIFETIME_SECONDS,
       );
       $payment->set('novapay_operation_id', $response->getOperationId());
+      $payment->set('novapay_external_id', $payment_request->getExternalId());
       $payment->set('novapay_payment_url', $response->getPaymentUrl());
       $payment->save();
 

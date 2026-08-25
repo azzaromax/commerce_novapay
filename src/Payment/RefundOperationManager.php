@@ -178,11 +178,15 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
         );
       }
 
-      $is_full = $this->isEmptySelection($quantities);
-      $items = $is_full
-        ? $this->buildFullSelection($current)
-        : $this->buildPartialSelection($current, $quantities);
-      if (!$is_full && $this->isCompleteSelection($current, $items)) {
+      if ($this->isEmptySelection($quantities)) {
+        throw InvalidRequestException::createForPayment(
+          $current,
+          'Select a positive quantity before submitting a NovaPay refund.',
+        );
+      }
+      $is_full = FALSE;
+      $items = $this->buildPartialSelection($current, $quantities);
+      if ($this->isCompleteSelection($current, $items)) {
         $is_full = TRUE;
         $items = $this->buildFullSelection($current);
       }
@@ -196,7 +200,6 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
           'A partial refund requires the NovaPay operation ID.',
         );
       }
-
       $operations = $is_full ? [] : [[
         'id' => $operation_id,
         'refund_amount' => $amount->getNumber(),
@@ -218,7 +221,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
           $current,
           $this->hasUncertainOutcome($exception)
             ? 'The NovaPay response is uncertain. Wait for postback confirmation before retrying.'
-            : 'NovaPay rejected the refund request.',
+            : $this->getDefinitiveFailureMessage($exception),
           previous: $exception,
         );
       }
@@ -978,7 +981,6 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     if (
       $exception instanceof ApiTransportException
       || $exception instanceof ApiFatalException
-      || $exception instanceof ApiProcessingException
     ) {
       return TRUE;
     }
@@ -994,6 +996,22 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     }
 
     return FALSE;
+  }
+
+  /**
+   * Gets a safe actionable message for a definitive API rejection.
+   */
+  private function getDefinitiveFailureMessage(\Throwable $exception): string {
+    if (!$exception instanceof ApiProcessingException) {
+      return 'NovaPay rejected the refund request.';
+    }
+
+    return match ($exception->getApiCode()) {
+      'RefundTryLaterError' => 'NovaPay cannot process this refund yet. Try again later.',
+      'UnsupportedProductError' => 'NovaPay does not support refunds for this payment product. Contact NovaPay support.',
+      'RefundError' => 'NovaPay reported RefundError. Contact NovaPay support and provide request UUID ' . ($exception->getRequestUuid() ?? 'from the NovaPay log') . '.',
+      default => 'NovaPay rejected the refund request.',
+    };
   }
 
 }

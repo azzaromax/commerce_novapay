@@ -57,4 +57,11 @@ final class AddPaymentRequest implements NovaPayRequestInterface {
     return $payload;
   }
 
+  /**
+   * Gets the external operation ID sent to NovaPay.
+   */
+  public function getExternalId(): ?string {
+    return $this->external_id;
+  }
+
 }
