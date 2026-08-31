@@ -20,7 +20,7 @@ msgid "When disabled, checkout displays the configured display name."
 msgstr "Якщо вимкнено, на сторінці оформлення замовлення відображається налаштована назва."
 
 msgid "Environment-local NovaPay settings"
-msgstr "Локальні налаштування NovaPay"
+msgstr "Налаштування NovaPay для поточного середовища"
 
 msgid "NovaPay API mode"
 msgstr "Режим API NovaPay"
@@ -38,7 +38,7 @@ msgid "Merchant ID"
 msgstr "ID мерчанта"
 
 msgid "Live keys"
-msgstr "Робочі ключі"
+msgstr "Ключі робочого середовища"
 
 msgid "Merchant private key"
 msgstr "Приватний ключ мерчанта"
@@ -59,7 +59,7 @@ msgid "Recipient identifier"
 msgstr "Ідентифікатор отримувача"
 
 msgid "Success redirect delay"
-msgstr "Затримка перенаправлення після успіху"
+msgstr "Затримка перенаправлення після успішної оплати"
 
 msgid "Enable detailed logging"
 msgstr "Увімкнути докладне журналювання"
@@ -174,3 +174,231 @@ msgstr "Завантажте обидва файли робочих ключів
 
 msgid "Upload valid RSA private and public PEM files."
 msgstr "Завантажте коректні приватний і публічний RSA PEM-файли."
+
+msgid "The NovaPay response is uncertain. Wait for postback confirmation before retrying."
+msgstr "Відповідь NovaPay неоднозначна. Дочекайтеся зворотного сповіщення перед повторною спробою."
+
+msgid "NovaPay rejected the refund request."
+msgstr "NovaPay відхилив запит на повернення."
+
+msgid "NovaPay cannot process this refund yet. Try again later."
+msgstr "NovaPay поки не може обробити це повернення. Спробуйте пізніше."
+
+msgid "NovaPay does not support refunds for this payment product. Contact NovaPay support."
+msgstr "NovaPay не підтримує повернення для цього платіжного продукту. Зверніться до служби підтримки NovaPay."
+
+msgid "NovaPay reported RefundError. Contact NovaPay support and provide request UUID @request_uuid."
+msgstr "NovaPay повідомив про RefundError. Зверніться до служби підтримки NovaPay і надайте UUID запиту @request_uuid."
+
+msgid "from the NovaPay log"
+msgstr "з журналу NovaPay"
+
+msgid "The authorized payment amount is unavailable."
+msgstr "Сума авторизованого платежу недоступна."
+
+msgid "The capture amount must be greater than zero and must not exceed the authorized amount."
+msgstr "Сума списання має бути більшою за нуль і не перевищувати авторизовану суму."
+
+msgid "Partial capture requires a NovaPay operation ID and recipient identifier."
+msgstr "Часткове списання потребує ID операції NovaPay та ідентифікатора отримувача."
+
+msgid "The payment must be saved before it can be updated."
+msgstr "Платіж потрібно зберегти перед оновленням."
+
+msgid "The NovaPay session ID is unavailable."
+msgstr "ID сесії NovaPay недоступний."
+
+msgid "Another NovaPay operation is already being processed."
+msgstr "Інша операція NovaPay уже обробляється."
+
+msgid "This authorization is not available for another NovaPay operation."
+msgstr "Ця авторизація недоступна для іншої операції NovaPay."
+
+msgid "The NovaPay session ID changed while preparing the operation."
+msgstr "ID сесії NovaPay змінився під час підготовки операції."
+
+msgid "NovaPay rejected the operation request."
+msgstr "NovaPay відхилив запит на виконання операції."
+
+msgid "Commerce payment storage is unavailable."
+msgstr "Сховище платежів Commerce недоступне."
+
+msgid "The NovaPay payment could not be reloaded safely."
+msgstr "Платіж NovaPay не вдалося безпечно перезавантажити."
+
+msgid "The payment must be saved before its NovaPay status can be checked."
+msgstr "Платіж потрібно зберегти перед перевіркою його статусу NovaPay."
+
+msgid "This payment cannot be reconciled with NovaPay at this time."
+msgstr "Цей платіж зараз неможливо звірити з NovaPay."
+
+msgid "The NovaPay session ID changed before the status check."
+msgstr "ID сесії NovaPay змінився перед перевіркою статусу."
+
+msgid "The NovaPay payment status could not be checked."
+msgstr "Не вдалося перевірити статус платежу NovaPay."
+
+msgid "NovaPay returned an unexpected session status."
+msgstr "NovaPay повернув неочікуваний статус сесії."
+
+msgid "The payment order is unavailable."
+msgstr "Замовлення, пов’язане з платежем, недоступне."
+
+msgid "This payment is not available for another NovaPay refund."
+msgstr "Для цього платежу не можна виконати ще одне повернення через NovaPay."
+
+msgid "The NovaPay session ID changed while preparing the refund."
+msgstr "ID сесії NovaPay змінився під час підготовки повернення."
+
+msgid "Select a positive quantity before submitting a NovaPay refund."
+msgstr "Укажіть кількість, більшу за нуль, перед надсиланням запиту на повернення до NovaPay."
+
+msgid "A partial refund requires the NovaPay operation ID."
+msgstr "Часткове повернення потребує ID операції NovaPay."
+
+msgid "This payment has no pending NovaPay refund."
+msgstr "Для цього платежу немає незавершеного повернення NovaPay."
+
+msgid "The NovaPay refund status could not be checked."
+msgstr "Не вдалося перевірити статус повернення NovaPay."
+
+msgid "The NovaPay operation ID is unavailable."
+msgstr "ID операції NovaPay недоступний."
+
+msgid "The confirmed NovaPay refund could not be saved atomically."
+msgstr "Не вдалося атомарно зберегти підтверджене повернення NovaPay."
+
+msgid "The refund contains an unavailable order item."
+msgstr "Повернення містить недоступну позицію замовлення."
+
+msgid "The refund quantity exceeds the paid quantity."
+msgstr "Кількість для повернення перевищує оплачену кількість."
+
+msgid "The refund quantity does not match the order item quantity step."
+msgstr "Кількість для повернення не відповідає кроку зміни кількості позиції замовлення."
+
+msgid "Select a positive quantity or leave every quantity empty for a full refund."
+msgstr "Укажіть кількість, більшу за нуль, або залиште всі поля кількості порожніми для повного повернення."
+
+msgid "The refundable payment balance is unavailable."
+msgstr "Залишок суми платежу, доступний для повернення, неможливо визначити."
+
+msgid "No refundable order item quantities remain."
+msgstr "Не залишилося позицій замовлення з кількістю, доступною для повернення."
+
+msgid "The refund amount exceeds the paid balance."
+msgstr "Сума повернення перевищує залишок сплаченої суми."
+
+msgid "The refund contains too many order items."
+msgstr "Для повернення вибрано забагато позицій замовлення."
+
+msgid "Refund quantities must be decimal strings."
+msgstr "Значення кількості для повернення мають бути десятковими числами у текстовому форматі."
+
+msgid "A refund quantity has an invalid format."
+msgstr "Кількість для повернення має некоректний формат."
+
+msgid "A refund quantity must be greater than zero."
+msgstr "Кількість для повернення має бути більшою за нуль."
+
+msgid "The payment must be saved before it can be refunded."
+msgstr "Платіж потрібно зберегти перед поверненням."
+
+msgid "Use the NovaPay item quantities for a partial refund."
+msgstr "Для часткового повернення вкажіть кількість позицій у формі NovaPay."
+
+msgid "NovaPay payment"
+msgstr "Платіж NovaPay"
+
+msgid "NovaPay operation ID"
+msgstr "ID операції NovaPay"
+
+msgid "The remote NovaPay operation identifier."
+msgstr "Ідентифікатор віддаленої операції NovaPay."
+
+msgid "NovaPay external operation ID"
+msgstr "Зовнішній ID операції NovaPay"
+
+msgid "The external ID supplied when the NovaPay payment operation was created."
+msgstr "Зовнішній ID, наданий під час створення платіжної операції NovaPay."
+
+msgid "NovaPay payment URL"
+msgstr "URL платежу NovaPay"
+
+msgid "The off-site URL returned for this NovaPay payment."
+msgstr "Зовнішній URL, повернений для цього платежу NovaPay."
+
+msgid "Pending NovaPay operation"
+msgstr "Незавершена операція NovaPay"
+
+msgid "A bounded command name retained until NovaPay confirmation."
+msgstr "Назва команди обмеженої довжини, що зберігається до підтвердження NovaPay."
+
+msgid "Pending NovaPay amount"
+msgstr "Сума незавершеної операції NovaPay"
+
+msgid "The decimal operation amount awaiting NovaPay confirmation."
+msgstr "Десяткова сума операції, що очікує на підтвердження NovaPay."
+
+msgid "Pending NovaPay refund"
+msgstr "Незавершене повернення NovaPay"
+
+msgid "A bounded item selection retained until NovaPay confirmation."
+msgstr "Перелік вибраних позицій обмеженого розміру, що зберігається до підтвердження NovaPay."
+
+msgid "Environment-local"
+msgstr "Для поточного середовища"
+
+msgid "NovaPay checkout could not be prepared. Please try again later."
+msgstr "Не вдалося підготувати оплату через NovaPay. Спробуйте пізніше."
+
+msgid "A Telephone field exists on these Commerce customer profile types. Edit its field settings and select “Use this field as the NovaPay payment phone”: @types."
+msgstr "У цих типах профілів покупця Commerce вже є поле «Телефон». Відкрийте налаштування поля та виберіть «Використовувати це поле як телефон для оплати NovaPay»: @types."
+
+msgid "Add a Telephone field to these Commerce customer profile types and mark it as the NovaPay payment phone: @types."
+msgstr "Додайте поле «Телефон» до цих типів профілів покупця Commerce та позначте його як телефон для оплати NovaPay: @types."
+
+msgid "Both live keys are installed for this payment gateway. Leave both upload fields empty to keep them unchanged. To replace them, upload both files together. Changing the Merchant ID does not replace the keys."
+msgstr "Для цього платіжного шлюзу встановлено обидва ключі робочого середовища. Залиште обидва поля завантаження порожніми, щоб не змінювати ключі. Для заміни завантажте обидва файли одночасно. Зміна ID мерчанта не замінює ключі."
+
+msgid "Commerce generates this URL. It cannot be entered manually."
+msgstr "Commerce створює цей URL автоматично. Його не можна ввести вручну."
+
+msgid "Live keys are not installed. Upload both key files together before saving live mode. After installation, leave both upload fields empty to keep the keys unchanged. Changing the Merchant ID does not replace the keys."
+msgstr "Ключі робочого середовища не встановлено. Перед збереженням робочого режиму завантажте обидва файли ключів одночасно. Після встановлення залишайте обидва поля завантаження порожніми, щоб не змінювати ключі. Зміна ID мерчанта не замінює ключі."
+
+msgid "NovaPay"
+msgstr "NovaPay"
+
+msgid "Only sanitized request and response metadata may be logged."
+msgstr "До журналу можна записувати лише очищені метадані запитів і відповідей."
+
+msgid "Optional EDRPOU or tax identifier of a payment recipient different from the merchant."
+msgstr "Необов’язковий код ЄДРПОУ або податковий ідентифікатор отримувача платежу, якщо він відрізняється від мерчанта."
+
+msgid "Partial capture is unavailable because Recipient identifier is not configured for this NovaPay payment gateway. The full authorized amount will be captured. Configure Recipient identifier in the payment gateway settings to enable partial capture."
+msgstr "Часткове списання недоступне, оскільки для цього платіжного шлюзу NovaPay не налаштовано ідентифікатор отримувача. Буде списано всю авторизовану суму. Налаштуйте ідентифікатор отримувача в параметрах платіжного шлюзу, щоб увімкнути часткове списання."
+
+msgid "Quantity @id"
+msgstr "Кількість @id"
+
+msgid "Seconds NovaPay displays its success page before automatically returning the customer to checkout. Use 0 to omit the automatic redirect timeout. Changes apply only to newly created NovaPay sessions."
+msgstr "Кількість секунд, протягом яких NovaPay показує сторінку успішної оплати перед автоматичним поверненням покупця до оформлення замовлення. Укажіть 0, щоб вимкнути автоматичне перенаправлення. Зміни застосовуються лише до нових сесій NovaPay."
+
+msgid "Select this file together with the NovaPay public key to install or replace both keys."
+msgstr "Виберіть цей файл разом із публічним ключем NovaPay, щоб установити або замінити обидва ключі."
+
+msgid "Select this file together with the merchant private key to install or replace both keys."
+msgstr "Виберіть цей файл разом із приватним ключем мерчанта, щоб установити або замінити обидва ключі."
+
+msgid "Test mode always uses the packaged NovaPay sandbox keys and Merchant ID 2."
+msgstr "У тестовому режимі завжди використовуються вбудовані ключі пісочниці NovaPay та ID мерчанта 2."
+
+msgid "The current local settings are unavailable. Saving requires writable private storage."
+msgstr "Поточні локальні налаштування недоступні. Для збереження потрібне доступне для запису приватне сховище."
+
+msgid "The live key status is unavailable because the local settings could not be read. Existing keys are never displayed. Upload both files together only when installing or replacing the keys."
+msgstr "Статус ключів робочого середовища недоступний, оскільки не вдалося прочитати локальні налаштування. Значення наявних ключів ніколи не відображаються. Завантажуйте обидва файли одночасно лише під час установлення або заміни ключів."
+
+msgid "These values are stored in the Drupal private filesystem and are not exported with configuration."
+msgstr "Ці значення зберігаються у приватній файловій системі Drupal і не експортуються разом із конфігурацією."

@@ -1736,6 +1736,7 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
       $this->container->get('lock'),
       $this->container->get('commerce_novapay.refund_ledger'),
       $this->container->get('database'),
+      $this->container->get('string_translation'),
     );
   }
 
@@ -1762,6 +1763,7 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
       $this->container->get('entity_type.manager'),
       $api_client,
       $lock ?? $this->container->get('lock'),
+      $this->container->get('string_translation'),
     );
   }
 
@@ -1776,6 +1778,7 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
       $api_client,
       $this->container->get('commerce_novapay.postback.status_mapper'),
       $this->container->get('lock'),
+      $this->container->get('string_translation'),
     );
   }
 

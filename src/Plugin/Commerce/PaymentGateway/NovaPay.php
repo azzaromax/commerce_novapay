@@ -649,7 +649,7 @@ final class NovaPay extends OffsitePaymentGatewayBase implements RuntimeConfigur
     ) {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'Use the NovaPay item quantities for a partial refund.',
+        (string) $this->t('Use the NovaPay item quantities for a partial refund.'),
       );
     }
     $this->refundOperationManager->refund($payment, $this);

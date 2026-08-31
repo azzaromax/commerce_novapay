@@ -65,6 +65,7 @@ services:
       - '@entity_type.manager'
       - '@commerce_novapay.api_client'
       - '@lock'
+      - '@string_translation'
 
   Drupal\commerce_novapay\Payment\AuthorizationOperationManagerInterface:
     alias: commerce_novapay.authorization_operation_manager
@@ -76,6 +77,7 @@ services:
       - '@commerce_novapay.api_client'
       - '@commerce_novapay.postback.status_mapper'
       - '@lock'
+      - '@string_translation'
 
   Drupal\commerce_novapay\Payment\PaymentStatusCheckManagerInterface:
     alias: commerce_novapay.payment_status_check_manager
@@ -97,6 +99,7 @@ services:
       - '@lock'
       - '@commerce_novapay.refund_ledger'
       - '@database'
+      - '@string_translation'
 
   Drupal\commerce_novapay\Payment\RefundOperationManagerInterface:
     alias: commerce_novapay.refund_operation_manager

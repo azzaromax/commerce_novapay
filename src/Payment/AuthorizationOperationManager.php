@@ -6,6 +6,8 @@ namespace Drupal\commerce_novapay\Payment;
 
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Lock\LockBackendInterface;
+use Drupal\Core\StringTranslation\StringTranslationTrait;
+use Drupal\Core\StringTranslation\TranslationInterface;
 use Drupal\commerce_novapay\Api\Dto\Request\CompleteHoldRequest;
 use Drupal\commerce_novapay\Api\Dto\Request\VoidRequest;
 use Drupal\commerce_novapay\Api\NovaPayApiClientInterface;
@@ -26,13 +28,18 @@ use Drupal\commerce_price\Price;
  */
 final class AuthorizationOperationManager implements AuthorizationOperationManagerInterface {
 
+  use StringTranslationTrait;
+
   private const LOCK_TIMEOUT_SECONDS = 30.0;
 
   public function __construct(
     private readonly EntityTypeManagerInterface $entity_type_manager,
     private readonly NovaPayApiClientInterface $api_client,
     private readonly LockBackendInterface $lock,
-  ) {}
+    TranslationInterface $string_translation,
+  ) {
+    $this->setStringTranslation($string_translation);
+  }
 
   /**
    * {@inheritdoc}
@@ -64,7 +71,7 @@ final class AuthorizationOperationManager implements AuthorizationOperationManag
         if (!$authorized_amount instanceof Price) {
           throw InvalidRequestException::createForPayment(
             $current,
-            'The authorized payment amount is unavailable.',
+            (string) $this->t('The authorized payment amount is unavailable.'),
           );
         }
         $capture_amount = $amount ?? $authorized_amount;
@@ -78,7 +85,7 @@ final class AuthorizationOperationManager implements AuthorizationOperationManag
         if (!$valid_amount) {
           throw InvalidRequestException::createForPayment(
             $current,
-            'The capture amount must be greater than zero and must not exceed the authorized amount.',
+            (string) $this->t('The capture amount must be greater than zero and must not exceed the authorized amount.'),
           );
         }
 
@@ -95,7 +102,7 @@ final class AuthorizationOperationManager implements AuthorizationOperationManag
           if ($operation_id === '' || $recipient_identifier === '') {
             throw InvalidRequestException::createForPayment(
               $current,
-              'Partial capture requires a NovaPay operation ID and recipient identifier.',
+              (string) $this->t('Partial capture requires a NovaPay operation ID and recipient identifier.'),
             );
           }
 
@@ -156,14 +163,14 @@ final class AuthorizationOperationManager implements AuthorizationOperationManag
     if (!is_int($payment_id) && !is_string($payment_id)) {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'The payment must be saved before it can be updated.',
+        (string) $this->t('The payment must be saved before it can be updated.'),
       );
     }
     $session_id = $payment->getRemoteId();
     if (!is_string($session_id) || trim($session_id) === '') {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'The NovaPay session ID is unavailable.',
+        (string) $this->t('The NovaPay session ID is unavailable.'),
       );
     }
     $session_id = trim($session_id);
@@ -171,7 +178,7 @@ final class AuthorizationOperationManager implements AuthorizationOperationManag
     if (!$this->lock->acquire($lock_name, self::LOCK_TIMEOUT_SECONDS)) {
       throw PaymentGatewayException::createForPayment(
         $payment,
-        'Another NovaPay operation is already being processed.',
+        (string) $this->t('Another NovaPay operation is already being processed.'),
       );
     }
 
@@ -180,14 +187,14 @@ final class AuthorizationOperationManager implements AuthorizationOperationManag
       if (!$this->isAvailableAuthorization($current)) {
         throw InvalidRequestException::createForPayment(
           $current,
-          'This authorization is not available for another NovaPay operation.',
+          (string) $this->t('This authorization is not available for another NovaPay operation.'),
         );
       }
       $remote_id = $current->getRemoteId();
       if (!is_string($remote_id) || trim($remote_id) !== $session_id) {
         throw InvalidRequestException::createForPayment(
           $current,
-          'The NovaPay session ID changed while preparing the operation.',
+          (string) $this->t('The NovaPay session ID changed while preparing the operation.'),
         );
       }
 
@@ -228,8 +235,8 @@ final class AuthorizationOperationManager implements AuthorizationOperationManag
       throw PaymentGatewayException::createForPayment(
         $payment,
         $this->hasUncertainOutcome($exception)
-          ? 'The NovaPay response is uncertain. Wait for postback confirmation before retrying.'
-          : 'NovaPay rejected the operation request.',
+          ? (string) $this->t('The NovaPay response is uncertain. Wait for postback confirmation before retrying.')
+          : (string) $this->t('NovaPay rejected the operation request.'),
         previous: $exception,
       );
     }
@@ -245,7 +252,7 @@ final class AuthorizationOperationManager implements AuthorizationOperationManag
     if (!$storage instanceof PaymentStorageInterface) {
       throw PaymentGatewayException::createForPayment(
         $payment,
-        'Commerce payment storage is unavailable.',
+        (string) $this->t('Commerce payment storage is unavailable.'),
       );
     }
     $payment_id = $payment->id();
@@ -258,7 +265,7 @@ final class AuthorizationOperationManager implements AuthorizationOperationManag
     ) {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'The NovaPay payment could not be reloaded safely.',
+        (string) $this->t('The NovaPay payment could not be reloaded safely.'),
       );
     }
 

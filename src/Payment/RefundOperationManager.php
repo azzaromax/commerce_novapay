@@ -8,6 +8,8 @@ use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\Display\EntityFormDisplayInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Lock\LockBackendInterface;
+use Drupal\Core\StringTranslation\StringTranslationTrait;
+use Drupal\Core\StringTranslation\TranslationInterface;
 use Drupal\commerce_novapay\Api\Dto\Request\GetStatusRequest;
 use Drupal\commerce_novapay\Api\Dto\Request\VoidRequest;
 use Drupal\commerce_novapay\Api\NovaPayApiClientInterface;
@@ -33,6 +35,8 @@ use Drupal\commerce_price\Price;
  */
 final class RefundOperationManager implements RefundOperationManagerInterface {
 
+  use StringTranslationTrait;
+
   private const LOCK_TIMEOUT_SECONDS = 30.0;
 
   private const MAX_PENDING_BYTES = 65535;
@@ -43,7 +47,10 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     private readonly LockBackendInterface $lock,
     private readonly RefundLedgerRepositoryInterface $ledger,
     private readonly Connection $database,
-  ) {}
+    TranslationInterface $string_translation,
+  ) {
+    $this->setStringTranslation($string_translation);
+  }
 
   /**
    * {@inheritdoc}
@@ -109,7 +116,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     if (!$order instanceof OrderInterface) {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'The payment order is unavailable.',
+        (string) $this->t('The payment order is unavailable.'),
       );
     }
 
@@ -168,7 +175,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     if ($session_id === '') {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'The NovaPay session ID is unavailable.',
+        (string) $this->t('The NovaPay session ID is unavailable.'),
       );
     }
 
@@ -176,7 +183,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     if (!$this->lock->acquire($lock_name, self::LOCK_TIMEOUT_SECONDS)) {
       throw PaymentGatewayException::createForPayment(
         $payment,
-        'Another NovaPay operation is already being processed.',
+        (string) $this->t('Another NovaPay operation is already being processed.'),
       );
     }
 
@@ -185,13 +192,13 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
       if (!$this->canRefund($current)) {
         throw InvalidRequestException::createForPayment(
           $current,
-          'This payment is not available for another NovaPay refund.',
+          (string) $this->t('This payment is not available for another NovaPay refund.'),
         );
       }
       if (trim((string) $current->getRemoteId()) !== $session_id) {
         throw InvalidRequestException::createForPayment(
           $current,
-          'The NovaPay session ID changed while preparing the refund.',
+          (string) $this->t('The NovaPay session ID changed while preparing the refund.'),
         );
       }
 
@@ -202,7 +209,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
       if (!$is_full && $this->isEmptySelection($quantities)) {
         throw InvalidRequestException::createForPayment(
           $current,
-          'Select a positive quantity before submitting a NovaPay refund.',
+          (string) $this->t('Select a positive quantity before submitting a NovaPay refund.'),
         );
       }
       $items = $is_full
@@ -219,7 +226,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
       if (!$is_full && $operation_id === '') {
         throw InvalidRequestException::createForPayment(
           $current,
-          'A partial refund requires the NovaPay operation ID.',
+          (string) $this->t('A partial refund requires the NovaPay operation ID.'),
         );
       }
       $operations = $is_full ? [] : [[
@@ -242,7 +249,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
         throw PaymentGatewayException::createForPayment(
           $current,
           $this->hasUncertainOutcome($exception)
-            ? 'The NovaPay response is uncertain. Wait for postback confirmation before retrying.'
+            ? (string) $this->t('The NovaPay response is uncertain. Wait for postback confirmation before retrying.')
             : $this->getDefinitiveFailureMessage($exception),
           previous: $exception,
         );
@@ -265,7 +272,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     if ($session_id === '') {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'The NovaPay session ID is unavailable.',
+        (string) $this->t('The NovaPay session ID is unavailable.'),
       );
     }
 
@@ -273,7 +280,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     if (!$this->lock->acquire($lock_name, self::LOCK_TIMEOUT_SECONDS)) {
       throw PaymentGatewayException::createForPayment(
         $payment,
-        'Another NovaPay operation is already being processed.',
+        (string) $this->t('Another NovaPay operation is already being processed.'),
       );
     }
 
@@ -282,13 +289,13 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
       if (!$this->canCheckStatus($current)) {
         throw InvalidRequestException::createForPayment(
           $current,
-          'This payment has no pending NovaPay refund.',
+          (string) $this->t('This payment has no pending NovaPay refund.'),
         );
       }
       if (trim((string) $current->getRemoteId()) !== $session_id) {
         throw InvalidRequestException::createForPayment(
           $current,
-          'The NovaPay session ID changed before the status check.',
+          (string) $this->t('The NovaPay session ID changed before the status check.'),
         );
       }
 
@@ -301,14 +308,14 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
       catch (\Throwable $exception) {
         throw PaymentGatewayException::createForPayment(
           $current,
-          'The NovaPay refund status could not be checked.',
+          (string) $this->t('The NovaPay refund status could not be checked.'),
           previous: $exception,
         );
       }
       if ($response->getSessionId() !== $session_id) {
         throw PaymentGatewayException::createForPayment(
           $current,
-          'NovaPay returned an unexpected session status.',
+          (string) $this->t('NovaPay returned an unexpected session status.'),
         );
       }
 
@@ -324,7 +331,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
       elseif (!$is_full) {
         throw InvalidRequestException::createForPayment(
           $current,
-          'The NovaPay operation ID is unavailable.',
+          (string) $this->t('The NovaPay operation ID is unavailable.'),
         );
       }
 
@@ -390,7 +397,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
         $transaction->rollBack();
         throw PaymentGatewayException::createForPayment(
           $current,
-          'The confirmed NovaPay refund could not be saved atomically.',
+          (string) $this->t('The confirmed NovaPay refund could not be saved atomically.'),
           previous: $exception,
         );
       }
@@ -507,7 +514,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
       if (!isset($available_items[$order_item_id])) {
         throw InvalidRequestException::createForPayment(
           $payment,
-          'The refund contains an unavailable order item.',
+          (string) $this->t('The refund contains an unavailable order item.'),
         );
       }
       $quantity = $this->normalizeQuantity($quantity, $payment, TRUE);
@@ -520,13 +527,13 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
       ) {
         throw InvalidRequestException::createForPayment(
           $payment,
-          'The refund quantity exceeds the paid quantity.',
+          (string) $this->t('The refund quantity exceeds the paid quantity.'),
         );
       }
       if (!$item->isQuantityMultiple($quantity)) {
         throw InvalidRequestException::createForPayment(
           $payment,
-          'The refund quantity does not match the order item quantity step.',
+          (string) $this->t('The refund quantity does not match the order item quantity step.'),
         );
       }
       $selections[] = new RefundSelection(
@@ -538,7 +545,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     if ($selections === []) {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'Select a positive quantity or leave every quantity empty for a full refund.',
+        (string) $this->t('Select a positive quantity or leave every quantity empty for a full refund.'),
       );
     }
 
@@ -559,7 +566,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     if (!$balance instanceof Price || !$balance->isPositive()) {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'The refundable payment balance is unavailable.',
+        (string) $this->t('The refundable payment balance is unavailable.'),
       );
     }
 
@@ -585,7 +592,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     if ($selections === []) {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'No refundable order item quantities remain.',
+        (string) $this->t('No refundable order item quantities remain.'),
       );
     }
     if ($remaining->isPositive()) {
@@ -616,7 +623,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     if (!$balance instanceof Price) {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'The refundable payment balance is unavailable.',
+        (string) $this->t('The refundable payment balance is unavailable.'),
       );
     }
     $total = new Price('0', $balance->getCurrencyCode());
@@ -626,7 +633,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     if (!$total->isPositive() || $total->greaterThan($balance)) {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'The refund amount exceeds the paid balance.',
+        (string) $this->t('The refund amount exceeds the paid balance.'),
       );
     }
 
@@ -655,7 +662,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     if (strlen($payload) > self::MAX_PENDING_BYTES) {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'The refund contains too many order items.',
+        (string) $this->t('The refund contains too many order items.'),
       );
     }
 
@@ -866,21 +873,21 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     if (!is_string($quantity)) {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'Refund quantities must be decimal strings.',
+        (string) $this->t('Refund quantities must be decimal strings.'),
       );
     }
     $quantity = trim($quantity);
     if (preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/D', $quantity) !== 1) {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'A refund quantity has an invalid format.',
+        (string) $this->t('A refund quantity has an invalid format.'),
       );
     }
     $quantity = Calculator::trim($quantity);
     if (!$allow_zero && Calculator::compare($quantity, '0') <= 0) {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'A refund quantity must be greater than zero.',
+        (string) $this->t('A refund quantity must be greater than zero.'),
       );
     }
 
@@ -932,7 +939,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     if (!$storage instanceof PaymentStorageInterface) {
       throw PaymentGatewayException::createForPayment(
         $payment,
-        'Commerce payment storage is unavailable.',
+        (string) $this->t('Commerce payment storage is unavailable.'),
       );
     }
     $storage->resetCache([$payment_id]);
@@ -944,7 +951,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     ) {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'The NovaPay payment could not be reloaded safely.',
+        (string) $this->t('The NovaPay payment could not be reloaded safely.'),
       );
     }
 
@@ -959,7 +966,7 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
     if ($payment_id === NULL) {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'The payment must be saved before it can be refunded.',
+        (string) $this->t('The payment must be saved before it can be refunded.'),
       );
     }
 
@@ -1026,14 +1033,16 @@ final class RefundOperationManager implements RefundOperationManagerInterface {
    */
   private function getDefinitiveFailureMessage(\Throwable $exception): string {
     if (!$exception instanceof ApiProcessingException) {
-      return 'NovaPay rejected the refund request.';
+      return (string) $this->t('NovaPay rejected the refund request.');
     }
 
     return match ($exception->getApiCode()) {
-      'RefundTryLaterError' => 'NovaPay cannot process this refund yet. Try again later.',
-      'UnsupportedProductError' => 'NovaPay does not support refunds for this payment product. Contact NovaPay support.',
-      'RefundError' => 'NovaPay reported RefundError. Contact NovaPay support and provide request UUID ' . ($exception->getRequestUuid() ?? 'from the NovaPay log') . '.',
-      default => 'NovaPay rejected the refund request.',
+      'RefundTryLaterError' => (string) $this->t('NovaPay cannot process this refund yet. Try again later.'),
+      'UnsupportedProductError' => (string) $this->t('NovaPay does not support refunds for this payment product. Contact NovaPay support.'),
+      'RefundError' => (string) $this->t('NovaPay reported RefundError. Contact NovaPay support and provide request UUID @request_uuid.', [
+        '@request_uuid' => $exception->getRequestUuid() ?? $this->t('from the NovaPay log'),
+      ]),
+      default => (string) $this->t('NovaPay rejected the refund request.'),
     };
   }
 

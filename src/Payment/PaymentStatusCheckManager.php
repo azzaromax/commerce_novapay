@@ -6,6 +6,8 @@ namespace Drupal\commerce_novapay\Payment;
 
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Lock\LockBackendInterface;
+use Drupal\Core\StringTranslation\StringTranslationTrait;
+use Drupal\Core\StringTranslation\TranslationInterface;
 use Drupal\commerce_novapay\Api\Dto\Request\GetStatusRequest;
 use Drupal\commerce_novapay\Api\NovaPayApiClientInterface;
 use Drupal\commerce_novapay\Postback\PaymentStatusMapperInterface;
@@ -20,6 +22,8 @@ use Drupal\commerce_payment\PaymentStorageInterface;
  */
 final class PaymentStatusCheckManager implements PaymentStatusCheckManagerInterface {
 
+  use StringTranslationTrait;
+
   private const LOCK_TIMEOUT_SECONDS = 30.0;
 
   public function __construct(
@@ -27,7 +31,10 @@ final class PaymentStatusCheckManager implements PaymentStatusCheckManagerInterf
     private readonly NovaPayApiClientInterface $api_client,
     private readonly PaymentStatusMapperInterface $status_mapper,
     private readonly LockBackendInterface $lock,
-  ) {}
+    TranslationInterface $string_translation,
+  ) {
+    $this->setStringTranslation($string_translation);
+  }
 
   /**
    * {@inheritdoc}
@@ -51,14 +58,14 @@ final class PaymentStatusCheckManager implements PaymentStatusCheckManagerInterf
     if (!is_int($payment_id) && !is_string($payment_id)) {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'The payment must be saved before its NovaPay status can be checked.',
+        (string) $this->t('The payment must be saved before its NovaPay status can be checked.'),
       );
     }
     $session_id = trim((string) $payment->getRemoteId());
     if ($session_id === '') {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'The NovaPay session ID is unavailable.',
+        (string) $this->t('The NovaPay session ID is unavailable.'),
       );
     }
 
@@ -66,7 +73,7 @@ final class PaymentStatusCheckManager implements PaymentStatusCheckManagerInterf
     if (!$this->lock->acquire($lock_name, self::LOCK_TIMEOUT_SECONDS)) {
       throw PaymentGatewayException::createForPayment(
         $payment,
-        'Another NovaPay operation is already being processed.',
+        (string) $this->t('Another NovaPay operation is already being processed.'),
       );
     }
 
@@ -75,13 +82,13 @@ final class PaymentStatusCheckManager implements PaymentStatusCheckManagerInterf
       if (!$this->canCheckStatus($current)) {
         throw InvalidRequestException::createForPayment(
           $current,
-          'This payment cannot be reconciled with NovaPay at this time.',
+          (string) $this->t('This payment cannot be reconciled with NovaPay at this time.'),
         );
       }
       if (trim((string) $current->getRemoteId()) !== $session_id) {
         throw InvalidRequestException::createForPayment(
           $current,
-          'The NovaPay session ID changed before the status check.',
+          (string) $this->t('The NovaPay session ID changed before the status check.'),
         );
       }
 
@@ -94,14 +101,14 @@ final class PaymentStatusCheckManager implements PaymentStatusCheckManagerInterf
       catch (\Throwable $exception) {
         throw PaymentGatewayException::createForPayment(
           $current,
-          'The NovaPay payment status could not be checked.',
+          (string) $this->t('The NovaPay payment status could not be checked.'),
           previous: $exception,
         );
       }
       if ($response->getSessionId() !== $session_id) {
         throw PaymentGatewayException::createForPayment(
           $current,
-          'NovaPay returned an unexpected session status.',
+          (string) $this->t('NovaPay returned an unexpected session status.'),
         );
       }
 
@@ -125,7 +132,7 @@ final class PaymentStatusCheckManager implements PaymentStatusCheckManagerInterf
     if (!$storage instanceof PaymentStorageInterface) {
       throw PaymentGatewayException::createForPayment(
         $payment,
-        'Commerce payment storage is unavailable.',
+        (string) $this->t('Commerce payment storage is unavailable.'),
       );
     }
     $storage->resetCache([$payment_id]);
@@ -137,7 +144,7 @@ final class PaymentStatusCheckManager implements PaymentStatusCheckManagerInterf
     ) {
       throw InvalidRequestException::createForPayment(
         $payment,
-        'The NovaPay payment could not be reloaded safely.',
+        (string) $this->t('The NovaPay payment could not be reloaded safely.'),
       );
     }
     return $current;
