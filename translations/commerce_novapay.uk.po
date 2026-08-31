@@ -1,0 +1,176 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: commerce_novapay\n"
+"Language: uk\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "Use this field as the NovaPay payment phone"
+msgstr "Використовувати це поле як телефон для оплати NovaPay"
+
+msgid "NovaPay will prefill its checkout phone from this field when the value is available and valid."
+msgstr "NovaPay заповнить номер телефону на сторінці оплати з цього поля, якщо значення доступне та коректне."
+
+msgid "Display the NovaPay logo instead of the payment method name"
+msgstr "Показувати логотип NovaPay замість назви способу оплати"
+
+msgid "When disabled, checkout displays the configured display name."
+msgstr "Якщо вимкнено, на сторінці оформлення замовлення відображається налаштована назва."
+
+msgid "Environment-local NovaPay settings"
+msgstr "Локальні налаштування NovaPay"
+
+msgid "NovaPay API mode"
+msgstr "Режим API NovaPay"
+
+msgid "Test"
+msgstr "Тестовий"
+
+msgid "Live"
+msgstr "Робочий"
+
+msgid "Sandbox credentials"
+msgstr "Облікові дані пісочниці"
+
+msgid "Merchant ID"
+msgstr "ID мерчанта"
+
+msgid "Live keys"
+msgstr "Робочі ключі"
+
+msgid "Merchant private key"
+msgstr "Приватний ключ мерчанта"
+
+msgid "NovaPay public key"
+msgstr "Публічний ключ NovaPay"
+
+msgid "Transaction mode"
+msgstr "Режим операції"
+
+msgid "Direct"
+msgstr "Пряма оплата"
+
+msgid "Hold"
+msgstr "Холд"
+
+msgid "Recipient identifier"
+msgstr "Ідентифікатор отримувача"
+
+msgid "Success redirect delay"
+msgstr "Затримка перенаправлення після успіху"
+
+msgid "Enable detailed logging"
+msgstr "Увімкнути докладне журналювання"
+
+msgid "Postback URL"
+msgstr "URL зворотного сповіщення"
+
+msgid "Check NovaPay payment status"
+msgstr "Перевірити статус платежу NovaPay"
+
+msgid "Check refund status"
+msgstr "Перевірити статус повернення"
+
+msgid "Check NovaPay refund status"
+msgstr "Перевірити статус повернення NovaPay"
+
+msgid "Capture submitted to NovaPay. Payment state will update after postback confirmation."
+msgstr "Запит на списання надіслано до NovaPay. Стан платежу оновиться після зворотного сповіщення."
+
+msgid "Void submitted to NovaPay. Payment state will update after postback confirmation."
+msgstr "Запит на скасування надіслано до NovaPay. Стан платежу оновиться після зворотного сповіщення."
+
+msgid "Refund submitted to NovaPay. Payment and item totals will update after NovaPay confirmation."
+msgstr "Запит на повернення надіслано до NovaPay. Суми платежу та позицій оновляться після підтвердження NovaPay."
+
+msgid "A partial refund is possible when the order payment was credited to the NovaPay account."
+msgstr "Часткове повернення можливе, якщо оплату замовлення зараховано на рахунок NovaPay."
+
+msgid "Order item"
+msgstr "Позиція замовлення"
+
+msgid "Paid quantity"
+msgstr "Оплачена кількість"
+
+msgid "Already refunded"
+msgstr "Вже повернено"
+
+msgid "Available"
+msgstr "Доступно"
+
+msgid "Unit price"
+msgstr "Ціна за одиницю"
+
+msgid "Quantity to refund"
+msgstr "Кількість для повернення"
+
+msgid "Refund amount"
+msgstr "Сума повернення"
+
+msgid "Quantity to refund for @item"
+msgstr "Кількість для повернення: @item"
+
+msgid "Total refund amount"
+msgstr "Загальна сума повернення"
+
+msgid "Set a quantity to zero to keep that order item. Select every remaining quantity to request a full refund."
+msgstr "Укажіть нульову кількість, щоб не повертати цю позицію. Виберіть усю доступну кількість, щоб оформити повне повернення."
+
+msgid "Enter an available quantity that is a multiple of @step."
+msgstr "Укажіть доступну кількість, кратну @step."
+
+msgid "This checks the current NovaPay payment status. It does not submit a payment, capture, void, or refund request."
+msgstr "Ця дія перевіряє поточний статус платежу NovaPay. Вона не надсилає запит на оплату, списання, скасування чи повернення."
+
+msgid "NovaPay payment status was reconciled."
+msgstr "Статус платежу NovaPay звірено."
+
+msgid "NovaPay has no conclusive status update for this payment."
+msgstr "NovaPay не надав остаточного оновлення статусу цього платежу."
+
+msgid "This checks the pending refund at NovaPay. It does not submit another refund request."
+msgstr "Ця дія перевіряє незавершене повернення в NovaPay. Вона не надсилає повторний запит на повернення."
+
+msgid "NovaPay confirmed the refund. Local payment totals were updated."
+msgstr "NovaPay підтвердив повернення. Локальні суми платежу оновлено."
+
+msgid "NovaPay has not confirmed the refund yet. The refund remains pending."
+msgstr "NovaPay ще не підтвердив повернення. Воно залишається в очікуванні."
+
+msgid "Available after the gateway is saved."
+msgstr "Доступно після збереження платіжного шлюзу."
+
+msgid "Enter a success redirect delay from 0 to @maximum seconds."
+msgstr "Укажіть затримку перенаправлення після успіху від 0 до @maximum секунд."
+
+msgid "Key status unavailable"
+msgstr "Статус ключів недоступний"
+
+msgid "Keys installed"
+msgstr "Ключі встановлено"
+
+msgid "Keys not installed"
+msgstr "Ключі не встановлено"
+
+msgid "Merchant ID is required in live mode."
+msgstr "У робочому режимі потрібно вказати ID мерчанта."
+
+msgid "NovaPay local settings cannot be saved securely."
+msgstr "Локальні налаштування NovaPay неможливо безпечно зберегти."
+
+msgid "Select a valid NovaPay API mode."
+msgstr "Виберіть коректний режим API NovaPay."
+
+msgid "Select a valid transaction mode."
+msgstr "Виберіть коректний режим операції."
+
+msgid "Upload both live key files together."
+msgstr "Завантажте обидва файли робочих ключів разом."
+
+msgid "Upload both live key files."
+msgstr "Завантажте обидва файли робочих ключів."
+
+msgid "Upload valid RSA private and public PEM files."
+msgstr "Завантажте коректні приватний і публічний RSA PEM-файли."
