@@ -30,8 +30,9 @@ direct payments, holds, captures, voids, and full or item-level refunds.
 >    root. Live settings and PEM files are stored there.
 > 4. Use `UAH` for payable orders and expose the generated callback URL through
 >    public HTTPS.
-> 5. Start with **Test** mode. **Live** mode requires the merchant's own Merchant
->    ID and both production PEM files obtained through NovaPay onboarding.
+> 5. Start with **Test** mode. **Live** mode requires the merchant's own
+>    Merchant ID and both production PEM files obtained through NovaPay
+>    onboarding.
 >
 > See the [administration guide](docs/ADMINISTRATION.md) for the complete setup.
 
@@ -256,4 +257,4 @@ logging is off by default and records sanitized metadata only.
 
 ## License
 
-GPL-2.0-or-later.
+Licensed under [GPL-2.0-or-later](LICENSE.txt).

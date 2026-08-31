@@ -1122,6 +1122,8 @@ final class NovaPayPaymentTest extends OrderKernelTestBase {
     self::assertInstanceOf(PaymentInterface::class, $payment);
     self::assertSame('completed', $payment->getState()->getId());
     self::assertSame('hold_confirmed', $payment->getRemoteState());
+    $this->reloadOrder();
+    self::assertEquals(new Price('30', 'USD'), $this->order->getTotalPaid());
   }
 
   /**

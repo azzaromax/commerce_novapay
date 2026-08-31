@@ -6,6 +6,7 @@ namespace Drupal\Tests\commerce_novapay\Unit\Postback;
 
 use Drupal\commerce_novapay\Postback\NovaPayStatus;
 use Drupal\commerce_novapay\Postback\PaymentStatusMapper;
+use Drupal\commerce_order\Entity\OrderInterface;
 use Drupal\commerce_payment\Entity\PaymentInterface;
 use Drupal\commerce_price\Price;
 use Drupal\state_machine\Plugin\Field\FieldType\StateItemInterface;
@@ -36,8 +37,13 @@ final class PaymentStatusMapperTest extends TestCase {
     $payment->method('getState')->willReturn($state);
     if ($transition_id === NULL) {
       $state->expects(self::never())->method('applyTransitionById');
+      $payment->expects(self::never())->method('getOrder');
     }
     else {
+      $order = $this->createMock(OrderInterface::class);
+      $payment->expects(self::once())->method('getOrder')
+        ->willReturn($order);
+      $order->expects(self::once())->method('save');
       $state->expects(self::once())->method('applyTransitionById')
         ->with($transition_id);
     }
@@ -55,6 +61,24 @@ final class PaymentStatusMapperTest extends TestCase {
       $transition_id !== NULL || $remote_status === NovaPayStatus::Processing,
       (new PaymentStatusMapper())->apply($payment, $remote_status),
     );
+  }
+
+  /**
+   * Tests that a transition cannot partially mutate an orphaned payment.
+   */
+  public function testTransitionRequiresParentOrder(): void {
+    $payment = $this->createMock(PaymentInterface::class);
+    $state = $this->createMock(StateItemInterface::class);
+    $state->method('getId')->willReturn('pending');
+    $payment->method('getState')->willReturn($state);
+    $payment->expects(self::once())->method('getOrder')->willReturn(NULL);
+    $state->expects(self::never())->method('applyTransitionById');
+    $payment->expects(self::never())->method('setRemoteState');
+    $payment->expects(self::never())->method('save');
+
+    $this->expectException(\UnexpectedValueException::class);
+    $this->expectExceptionMessage('no parent order');
+    (new PaymentStatusMapper())->apply($payment, NovaPayStatus::Paid);
   }
 
   /**

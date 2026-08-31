@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\commerce_novapay\Postback;
 
 use Drupal\commerce_novapay\Payment\PendingOperation;
+use Drupal\commerce_order\Entity\OrderInterface;
 use Drupal\commerce_payment\Entity\PaymentInterface;
 use Drupal\commerce_price\Price;
 
@@ -23,13 +24,19 @@ final class PaymentStatusMapper implements PaymentStatusMapperInterface {
     $state = $payment->getState();
     $transition_id = $this->getTransitionId($state->getId(), $status);
     if ($transition_id !== NULL) {
+      $order = $payment->getOrder();
+      if (!$order instanceof OrderInterface) {
+        throw new \UnexpectedValueException(
+          'The NovaPay payment has no parent order.',
+        );
+      }
       $this->applyConfirmedCaptureAmount($payment, $status);
       $this->applyConfirmedFullRefund($payment, $status);
       $this->clearPendingOperation($payment);
       $state->applyTransitionById($transition_id);
       $payment->setRemoteState($status->value);
       $payment->save();
-      $payment->getOrder()->save();
+      $order->save();
       return TRUE;
     }
 
